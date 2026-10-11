@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -257,6 +258,16 @@ func StartAudioCapture(ctx context.Context, testTone bool, codec AudioCodec) (*A
 		srcArgs = []string{"audiotestsrc", "wave=sine", "freq=440", "is-live=true",
 			fmt.Sprintf("samplesperbuffer=%d", codecSPF)}
 		dbg("[AUDIO] using test tone (440 Hz sine wave, live, spf=%d)", codecSPF)
+	} else if runtime.GOOS == "windows" {
+		if exec.Command("gst-inspect-1.0", "wasapi2src").Run() != nil {
+			cancel()
+			return nil, fmt.Errorf("GStreamer 'wasapi2src' plugin not found; install the 64-bit GStreamer MSVC runtime with bad plugins")
+		}
+		// WASAPI loopback records the default playback endpoint: exactly the
+		// system mix heard through the Windows speakers. Low-latency mode is safe
+		// on every supported wasapi2 version and avoids a device-side backlog.
+		srcArgs = []string{"wasapi2src", "loopback=true", "low-latency=true"}
+		dbg("[AUDIO] using WASAPI2 default-render loopback")
 	} else {
 		hasPipeWireSource := exec.Command("gst-inspect-1.0", "pipewiresrc").Run() == nil
 		hasPulseSource := exec.Command("gst-inspect-1.0", "pulsesrc").Run() == nil

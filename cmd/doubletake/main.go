@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -73,6 +74,10 @@ func main() {
 	noEncrypt := flag.Bool("no-encrypt", false, "Disable RTSP header encryption (debugging only; video frames are always encrypted)")
 	directKey := flag.Bool("direct-key", false, "Use shk/shiv directly without SHA-512 derivation")
 	noAudio := flag.Bool("no-audio", false, "Disable audio streaming")
+	preserveReceiverVolume := flag.Bool("preserve-receiver-volume", true, "Leave the receiver's existing volume unchanged")
+	captureSource := flag.String("capture-source", "monitor", "Capture source: monitor or window")
+	windowsMonitorIndex := flag.Int("monitor-index", -1, "Windows monitor index (-1 = primary display)")
+	windowsWindowHandle := flag.String("window-handle", "", "Windows HWND to capture, decimal or 0xhex")
 	portRange := flag.String("port-range", "", "Local UDP port range for receiver timing/audio (e.g. \"60000-60010\"); empty = OS ephemeral. Needs at least 3 ports.")
 	debug := flag.Bool("debug", false, "Enable verbose debug logging")
 	daemonize := flag.Bool("daemonize", false, "Run as background daemon with Unix socket control interface")
@@ -80,12 +85,40 @@ func main() {
 	x11WindowID := flag.String("x11-window-id", "", "X11 window id to capture, decimal or 0xhex")
 	x11WindowName := flag.String("x11-window-name", "", "X11 window name to capture; prefer -x11-window-id")
 	noCursor := flag.Bool("no-cursor", false, "Don't show the mouse cursor in the captured video")
+	discoverJSON := flag.Bool("discover-json", false, "Discover AirPlay receivers for 5 seconds and print JSON")
 	flag.Parse()
+	if *discoverJSON {
+		discoverCtx, cancelDiscover := context.WithTimeout(context.Background(), 5*time.Second)
+		devices, err := airplay.DiscoverAirPlayDevices(discoverCtx)
+		cancelDiscover()
+		if err != nil {
+			log.Fatalf("discovery failed: %v", err)
+		}
+		type discoveredDevice struct {
+			Name  string `json:"name"`
+			Model string `json:"model"`
+			IP    string `json:"ip"`
+			Port  int    `json:"port"`
+		}
+		result := make([]discoveredDevice, 0, len(devices))
+		for _, device := range devices {
+			result = append(result, discoveredDevice{
+				Name: device.Name, Model: device.Model, IP: device.IP, Port: device.Port,
+			})
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			log.Fatalf("encode discovery result: %v", err)
+		}
+		return
+	}
 	if err := airplay.ValidateHWAccel(*hwaccel); err != nil {
 		log.Fatalf("invalid -hwaccel: %v", err)
 	}
 	if err := airplay.ValidateVideoCodec(*videoCodec); err != nil {
 		log.Fatalf("invalid -video-codec: %v", err)
+	}
+	if err := airplay.ValidateWaylandSource(*captureSource); err != nil {
+		log.Fatalf("invalid -capture-source: %v", err)
 	}
 	portMin, portMax, err := parsePortRange(*portRange)
 	if err != nil {
@@ -104,22 +137,24 @@ func main() {
 
 	if *daemonize {
 		runDaemon(daemon.Config{
-			SocketPath:  *socketPath,
-			CredFile:    *credFile,
-			CredBackend: *credBackend,
-			FPS:         *fps,
-			Bitrate:     *bitrate,
-			PortMin:     portMin,
-			PortMax:     portMax,
-			HWAccel:     *hwaccel,
-			VideoCodec:  airplay.VideoCodec(*videoCodec),
-			Debug:       *debug,
-			TestMode:    *testMode,
-			NoEncrypt:   *noEncrypt,
-			DirectKey:   *directKey,
-			NoAudio:     *noAudio,
-			ShowCursor:  !*noCursor,
-			Code:        credential,
+			SocketPath:             *socketPath,
+			CredFile:               *credFile,
+			CredBackend:            *credBackend,
+			FPS:                    *fps,
+			Bitrate:                *bitrate,
+			PortMin:                portMin,
+			PortMax:                portMax,
+			HWAccel:                *hwaccel,
+			VideoCodec:             airplay.VideoCodec(*videoCodec),
+			Debug:                  *debug,
+			TestMode:               *testMode,
+			NoEncrypt:              *noEncrypt,
+			DirectKey:              *directKey,
+			NoAudio:                *noAudio,
+			PreserveReceiverVolume: *preserveReceiverVolume,
+			WaylandSource:          *captureSource,
+			ShowCursor:             !*noCursor,
+			Code:                   credential,
 		})
 		return
 	}
@@ -130,6 +165,10 @@ func main() {
 	xid, err := parseXID(*x11WindowID)
 	if err != nil {
 		log.Fatalf("invalid -x11-window-id: %v", err)
+	}
+	windowHandle, err := parseXID(*windowsWindowHandle)
+	if err != nil {
+		log.Fatalf("invalid -window-handle: %v", err)
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -325,27 +364,31 @@ func main() {
 	}
 
 	streamCfg := airplay.StreamConfig{
-		FPS:        *fps,
-		Bitrate:    *bitrate,
-		VideoCodec: airplay.VideoCodec(*videoCodec),
-		NoEncrypt:  *noEncrypt,
-		DirectKey:  *directKey,
-		NoAudio:    *noAudio,
-		PortMin:    portMin,
-		PortMax:    portMax,
+		FPS:                    *fps,
+		Bitrate:                *bitrate,
+		VideoCodec:             airplay.VideoCodec(*videoCodec),
+		NoEncrypt:              *noEncrypt,
+		DirectKey:              *directKey,
+		NoAudio:                *noAudio,
+		PreserveReceiverVolume: *preserveReceiverVolume,
+		PortMin:                portMin,
+		PortMax:                portMax,
 	}
 	// Complete the potentially interactive Wayland portal request before SETUP,
 	// but delay encoder startup until control SETUP returns session-time display
 	// information. Some current receivers omit displays before that session
 	// exists; committing the pipeline earlier silently selects the 720p fallback.
 	captureCfg := airplay.CaptureConfig{
-		FPS:           *fps,
-		Bitrate:       *bitrate,
-		HWAccel:       *hwaccel,
-		VideoCodec:    airplay.VideoCodec(*videoCodec),
-		X11WindowID:   xid,
-		X11WindowName: *x11WindowName,
-		ShowCursor:    !*noCursor,
+		FPS:                 *fps,
+		Bitrate:             *bitrate,
+		HWAccel:             *hwaccel,
+		VideoCodec:          airplay.VideoCodec(*videoCodec),
+		X11WindowID:         xid,
+		X11WindowName:       *x11WindowName,
+		ShowCursor:          !*noCursor,
+		WaylandSource:       *captureSource,
+		WindowsMonitorIndex: *windowsMonitorIndex,
+		WindowsWindowHandle: windowHandle,
 	}
 	if *testMode {
 		if *noAudio {

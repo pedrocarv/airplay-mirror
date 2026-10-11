@@ -86,34 +86,37 @@ type DeviceInfo struct {
 
 // Config holds daemon configuration.
 type Config struct {
-	SocketPath  string
-	CredFile    string
-	CredBackend string
-	FPS         int
-	Bitrate     int
-	PortMin     int // inclusive local UDP port bound; zero with PortMax means ephemeral
-	PortMax     int // inclusive local UDP port bound; zero with PortMin means ephemeral
-	HWAccel     string
-	VideoCodec  airplay.VideoCodec
-	Debug       bool
-	TestMode    bool
-	NoEncrypt   bool
-	DirectKey   bool
-	NoAudio     bool
-	ShowCursor  bool
-	Code        string // default pairing/Digest credential; request Pin overrides it
+	SocketPath             string
+	CredFile               string
+	CredBackend            string
+	FPS                    int
+	Bitrate                int
+	PortMin                int // inclusive local UDP port bound; zero with PortMax means ephemeral
+	PortMax                int // inclusive local UDP port bound; zero with PortMin means ephemeral
+	HWAccel                string
+	VideoCodec             airplay.VideoCodec
+	Debug                  bool
+	TestMode               bool
+	NoEncrypt              bool
+	DirectKey              bool
+	NoAudio                bool
+	PreserveReceiverVolume bool
+	WaylandSource          string
+	ShowCursor             bool
+	Code                   string // default pairing/Digest credential; request Pin overrides it
 }
 
 func (d *Daemon) mirrorStreamConfig() airplay.StreamConfig {
 	return airplay.StreamConfig{
-		FPS:        d.cfg.FPS,
-		Bitrate:    d.cfg.Bitrate,
-		VideoCodec: d.cfg.VideoCodec,
-		NoEncrypt:  d.cfg.NoEncrypt,
-		DirectKey:  d.cfg.DirectKey,
-		NoAudio:    d.cfg.NoAudio,
-		PortMin:    d.cfg.PortMin,
-		PortMax:    d.cfg.PortMax,
+		FPS:                    d.cfg.FPS,
+		Bitrate:                d.cfg.Bitrate,
+		VideoCodec:             d.cfg.VideoCodec,
+		NoEncrypt:              d.cfg.NoEncrypt,
+		DirectKey:              d.cfg.DirectKey,
+		NoAudio:                d.cfg.NoAudio,
+		PreserveReceiverVolume: d.cfg.PreserveReceiverVolume,
+		PortMin:                d.cfg.PortMin,
+		PortMax:                d.cfg.PortMax,
 	}
 }
 
@@ -152,9 +155,9 @@ func acquireInstanceLock(socketPath string) (*os.File, error) {
 		lockFile.Close()
 		return nil, fmt.Errorf("chmod daemon lock %s: %w", lockPath, err)
 	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockInstanceFile(lockFile); err != nil {
 		lockFile.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+		if isInstanceLockBusy(err) {
 			return nil, fmt.Errorf("another doubletake daemon is already running for %s", socketPath)
 		}
 		return nil, fmt.Errorf("lock daemon instance %s: %w", lockPath, err)
@@ -166,7 +169,7 @@ func releaseInstanceLock(lockFile *os.File) {
 	if lockFile == nil {
 		return
 	}
-	_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	_ = unlockInstanceFile(lockFile)
 	_ = lockFile.Close()
 }
 
@@ -1324,12 +1327,13 @@ func (d *Daemon) prepareVideoCapture(ctx context.Context, restoreToken, deviceID
 		codec = codecs[0]
 	}
 	cfg := airplay.CaptureConfig{
-		FPS:          d.cfg.FPS,
-		Bitrate:      d.cfg.Bitrate,
-		HWAccel:      d.cfg.HWAccel,
-		VideoCodec:   codec,
-		ShowCursor:   d.cfg.ShowCursor,
-		RestoreToken: restoreToken,
+		FPS:           d.cfg.FPS,
+		Bitrate:       d.cfg.Bitrate,
+		HWAccel:       d.cfg.HWAccel,
+		VideoCodec:    codec,
+		ShowCursor:    d.cfg.ShowCursor,
+		WaylandSource: d.cfg.WaylandSource,
+		RestoreToken:  restoreToken,
 	}
 	if deviceID != "" {
 		cfg.SaveRestoreToken = func(token string) error {
@@ -1485,14 +1489,15 @@ func (d *Daemon) getOrStartCaptureGroup(entry *activeStream, restoreToken, devic
 	d.mu.Unlock()
 
 	capCfg := airplay.CaptureConfig{
-		FPS:          d.cfg.FPS,
-		Bitrate:      d.cfg.Bitrate,
-		HWAccel:      d.cfg.HWAccel,
-		VideoCodec:   codec,
-		MaxWidth:     key.maxWidth,
-		MaxHeight:    key.maxHeight,
-		ShowCursor:   d.cfg.ShowCursor,
-		RestoreToken: restoreToken,
+		FPS:           d.cfg.FPS,
+		Bitrate:       d.cfg.Bitrate,
+		HWAccel:       d.cfg.HWAccel,
+		VideoCodec:    codec,
+		MaxWidth:      key.maxWidth,
+		MaxHeight:     key.maxHeight,
+		ShowCursor:    d.cfg.ShowCursor,
+		WaylandSource: d.cfg.WaylandSource,
+		RestoreToken:  restoreToken,
 	}
 	if deviceID != "" {
 		capCfg.SaveRestoreToken = func(token string) error {

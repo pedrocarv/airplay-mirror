@@ -237,8 +237,9 @@ type MirrorSession struct {
 	mediaClock         *mediaClock
 
 	// Audio
-	audioStream *AudioStream
-	noAudio     bool
+	audioStream            *AudioStream
+	noAudio                bool
+	preserveReceiverVolume bool
 }
 
 func selectAudioSecurityMode(encrypted bool) audioSecurityMode {
@@ -1113,14 +1114,15 @@ func (c *AirPlayClient) setupMirrorSession(ctx context.Context, cfg StreamConfig
 		return nil, err
 	}
 
-	// Only set the receiver's volume when this session actually carries audio.
+	// Only set the receiver's volume when this session actually carries audio
+	// and the caller explicitly allows changing the receiver's saved level.
 	// `volume: 0.000000` is 0 dB — full scale in AirPlay, not silence — so a
 	// video-only session would force the receiver to maximum on every connect.
 	// Sending -144 instead would be equally destructive of the user's setting;
 	// a session that transmits no audio has no use for the receiver's audio
 	// state and should leave its volume untouched.
-	if cfg.NoAudio {
-		dbg("[SETUP] no-audio session: skipping SET_PARAMETER volume")
+	if cfg.NoAudio || cfg.PreserveReceiverVolume {
+		dbg("[SETUP] preserving receiver volume; skipping SET_PARAMETER volume")
 	} else {
 		// Positive dB values are invalid here and current receivers may
 		// interpret them as zero gain. Real senders send the sender's own
@@ -1148,20 +1150,21 @@ func (c *AirPlayClient) setupMirrorSession(ctx context.Context, cfg StreamConfig
 	}
 
 	session := &MirrorSession{
-		client:         c,
-		dataConn:       dataConn,
-		eventConn:      receiverEventConn,
-		cancel:         cancelSession,
-		DataPort:       dataPort,
-		videoCodec:     videoCodec,
-		firstFrameSent: make(chan struct{}),
-		streamDone:     make(chan struct{}),
-		noAudio:        cfg.NoAudio,
-		sessionURI:     audioURI,
-		timingConn:     timingConn,
-		timestampBias:  latencies.video,
-		timingProtocol: timingProtocol,
-		mediaClock:     clock,
+		client:                 c,
+		dataConn:               dataConn,
+		eventConn:              receiverEventConn,
+		cancel:                 cancelSession,
+		DataPort:               dataPort,
+		videoCodec:             videoCodec,
+		firstFrameSent:         make(chan struct{}),
+		streamDone:             make(chan struct{}),
+		noAudio:                cfg.NoAudio,
+		preserveReceiverVolume: cfg.PreserveReceiverVolume,
+		sessionURI:             audioURI,
+		timingConn:             timingConn,
+		timestampBias:          latencies.video,
+		timingProtocol:         timingProtocol,
+		mediaClock:             clock,
 	}
 
 	// Set up the video cipher. Encrypted pair-verify uses ChaCha20-Poly1305 with
@@ -2422,6 +2425,9 @@ func (s *MirrorSession) SetAudioMuted(muted bool) error {
 	// not sufficient to tell the two apart.
 	if s.noAudio {
 		return fmt.Errorf("audio control unavailable: session was started with audio disabled")
+	}
+	if s.preserveReceiverVolume {
+		return fmt.Errorf("audio control unavailable: session preserves receiver volume")
 	}
 
 	if _, _, err := s.client.rtspRequest("SET_PARAMETER", s.sessionURI, "text/parameters", audioVolumeBody(muted), nil); err != nil {

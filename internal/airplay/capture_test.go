@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -281,9 +280,7 @@ func TestStartGStreamerCommandSetsParentDeathSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startGStreamerCommand: %v", err)
 	}
-	if cmd.SysProcAttr == nil || cmd.SysProcAttr.Pdeathsig != syscall.SIGKILL {
-		t.Fatalf("Pdeathsig = %v, want SIGKILL", cmd.SysProcAttr)
-	}
+	assertGStreamerChildPolicy(t, cmd)
 	if err := <-waitResult; err != nil {
 		t.Fatalf("wait for supervised command: %v", err)
 	}
@@ -964,13 +961,13 @@ func TestSystemWaylandPipelineDetachesBeforeRetention(t *testing.T) {
 	encoder := encoderResult{parts: gstStage{"openh264enc"}, rawFormat: "I420", codec: VideoCodecH264}
 	pipeline := buildSystemWaylandVideoPipeline(3, 42, 30, encoder, 1920, 1080, true)
 	joined := strings.Join(pipeline, " ")
-	for _, forbidden := range []string{"always-copy", "vapostproc", "memory:VAMemory"} {
+	for _, forbidden := range []string{"vapostproc", "memory:VAMemory"} {
 		if strings.Contains(joined, forbidden) {
 			t.Errorf("system-memory Wayland pipeline contains %q: %s", forbidden, joined)
 		}
 	}
 	wantOrder := []string{
-		"pipewiresrc", "fd=3", "path=42", "do-timestamp=true", "keepalive-time=34",
+		"pipewiresrc", "fd=3", "path=42", "do-timestamp=true", "keepalive-time=34", "always-copy=true",
 		"!", "video/x-raw(ANY),pixel-aspect-ratio=1/1",
 		"!", "videoconvert", "!", "video/x-raw,format=NV12",
 		"!", "videoscale", "add-borders=true", "!", "video/x-raw,width=1920,height=1080,pixel-aspect-ratio=1/1",
@@ -982,6 +979,31 @@ func TestSystemWaylandPipelineDetachesBeforeRetention(t *testing.T) {
 	}
 	if !containsPipelineSequence(pipeline, wantOrder) {
 		t.Fatalf("system conversion must preserve square pixels and own the frame before scaling, live cadence, queuing, and encoding:\n%s", joined)
+	}
+}
+
+func TestWindowsCaptureSourceStage(t *testing.T) {
+	monitor := strings.Join(windowsCaptureSourceStage(CaptureConfig{
+		ShowCursor:          true,
+		WindowsMonitorIndex: 2,
+	}), " ")
+	for _, want := range []string{"d3d11screencapturesrc", "show-cursor=true", "capture-api=dxgi", "monitor-index=2"} {
+		if !strings.Contains(monitor, want) {
+			t.Errorf("Windows monitor source is missing %q: %s", want, monitor)
+		}
+	}
+
+	window := strings.Join(windowsCaptureSourceStage(CaptureConfig{
+		WaylandSource:       "window",
+		WindowsWindowHandle: 0x1234,
+	}), " ")
+	for _, want := range []string{"d3d11screencapturesrc", "show-cursor=false", "capture-api=wgc", "window-handle=4660"} {
+		if !strings.Contains(window, want) {
+			t.Errorf("Windows window source is missing %q: %s", want, window)
+		}
+	}
+	if strings.Contains(window, "monitor-index") {
+		t.Errorf("Windows window source includes a monitor selector: %s", window)
 	}
 }
 

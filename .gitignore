@@ -1,2 +1,8 @@
 /bin
 /artifacts
+/dist
+*.exe
+*.zip
+*.tar.gz
+__pycache__/
+*.pyc

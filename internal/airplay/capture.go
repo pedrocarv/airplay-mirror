@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -40,11 +39,27 @@ type CaptureConfig struct {
 
 	X11WindowID   uint64
 	X11WindowName string
+	// WindowsMonitorIndex selects a zero-based display (-1 means the primary
+	// display). WindowsWindowHandle selects an HWND when WaylandSource is
+	// "window" on Windows.
+	WindowsMonitorIndex int
+	WindowsWindowHandle uint64
 
-	ShowCursor bool // show the mouse cursor in the captured video (Wayland and X11)
+	ShowCursor    bool   // show the mouse cursor in the captured video (Wayland and X11)
+	WaylandSource string // "monitor" (default) or "window" for portal capture
 
 	RestoreToken     string
 	SaveRestoreToken func(string) error
+}
+
+// ValidateWaylandSource checks the XDG ScreenCast portal source selection.
+func ValidateWaylandSource(source string) error {
+	switch source {
+	case "", "monitor", "window":
+		return nil
+	default:
+		return fmt.Errorf("unknown capture source %q (want monitor or window)", source)
+	}
 }
 
 // ValidateHWAccel checks a capture encoder preference. An empty value keeps the
@@ -97,6 +112,7 @@ type capturePreparationKind uint8
 const (
 	capturePreparationX11 capturePreparationKind = iota
 	capturePreparationWayland
+	capturePreparationWindows
 	capturePreparationTest
 )
 
@@ -217,6 +233,9 @@ func probeX11CaptureSource(ctx context.Context, display string, cfg CaptureConfi
 // is acquired immediately; X11 needs no external session and is merely
 // validated until Start is called.
 func PrepareCapture(ctx context.Context, cfg CaptureConfig) (*CapturePreparation, error) {
+	if err := ValidateWaylandSource(cfg.WaylandSource); err != nil {
+		return nil, err
+	}
 	if err := ValidateVideoCodec(string(cfg.VideoCodec)); err != nil {
 		return nil, err
 	}
@@ -224,7 +243,15 @@ func PrepareCapture(ctx context.Context, cfg CaptureConfig) (*CapturePreparation
 		return nil, err
 	}
 	kind := capturePreparationX11
-	if (cfg.X11WindowID != 0 || cfg.X11WindowName != "") && os.Getenv("DISPLAY") != "" {
+	if runtime.GOOS == "windows" {
+		kind = capturePreparationWindows
+		if !hasGstElement("d3d11screencapturesrc") {
+			return nil, fmt.Errorf("GStreamer 'd3d11screencapturesrc' plugin not found; install the 64-bit GStreamer MSVC runtime with bad plugins")
+		}
+		if cfg.WaylandSource == "window" && cfg.WindowsWindowHandle == 0 {
+			return nil, fmt.Errorf("Windows window capture requires -window-handle HWND")
+		}
+	} else if (cfg.X11WindowID != 0 || cfg.X11WindowName != "") && os.Getenv("DISPLAY") != "" {
 		kind = capturePreparationX11
 	} else if os.Getenv("WAYLAND_DISPLAY") != "" {
 		kind = capturePreparationWayland
@@ -278,12 +305,24 @@ func PrepareCapture(ctx context.Context, cfg CaptureConfig) (*CapturePreparation
 	if err := probeWaylandDisplay(ctx, os.Getenv("WAYLAND_DISPLAY")); err != nil {
 		return nil, err
 	}
-	nodeID, pwFd, portal, restoreToken, err := requestScreencast(ctx, cfg.RestoreToken, cfg.ShowCursor, &preparation.streamSize)
+	// Hyprland's screencast portal currently ignores the requested source type
+	// when restoring a persisted selection. A token saved for a window can
+	// therefore silently override a later monitor-only request. Window streams
+	// renegotiate their size when entering fullscreen, which triggers the
+	// portal's out-of-buffer failure. Always ask for a fresh source so the user
+	// can explicitly select the stable physical display.
+	portalRestoreToken := ""
+	portalSaveRestoreToken := (func(string) error)(nil)
+	portalSourceTypes := uint32(1) // MONITOR
+	if cfg.WaylandSource == "window" {
+		portalSourceTypes = 2 // WINDOW
+	}
+	nodeID, pwFd, portal, restoreToken, err := requestScreencast(ctx, portalRestoreToken, cfg.ShowCursor, portalSourceTypes, &preparation.streamSize)
 	if err != nil {
 		return nil, fmt.Errorf("screencast portal: %w", err)
 	}
-	if restoreToken != "" && cfg.SaveRestoreToken != nil {
-		if err := cfg.SaveRestoreToken(restoreToken); err != nil {
+	if restoreToken != "" && portalSaveRestoreToken != nil {
+		if err := portalSaveRestoreToken(restoreToken); err != nil {
 			log.Printf("[CAPTURE] warning: failed to save screencast restore token: %v", err)
 		}
 	}
@@ -449,6 +488,8 @@ func (p *CapturePreparation) startWithContextAndCodec(lifetime context.Context, 
 	switch kind {
 	case capturePreparationWayland:
 		return startPreparedWaylandCapture(startupCtx, captureCtx, cfg, encoder, nodeID, pwFd, portal, streamSize, timestampedOutput)
+	case capturePreparationWindows:
+		return startPreparedWindowsCapture(startupCtx, captureCtx, cfg, encoder, timestampedOutput)
 	case capturePreparationX11:
 		return startPreparedX11Capture(startupCtx, captureCtx, cfg, encoder, timestampedOutput)
 	case capturePreparationTest:
@@ -767,35 +808,6 @@ func automaticHEVCAvailable(hwaccel string) bool {
 	return ok
 }
 
-// startGStreamerCommand starts a capture child whose lifetime cannot outlive
-// doubletake. Linux delivers Pdeathsig when the creating OS thread exits, not
-// strictly when the whole process exits, so the supervising goroutine keeps
-// that thread locked until Wait completes.
-func startGStreamerCommand(cmd *exec.Cmd) (<-chan error, error) {
-	started := make(chan error, 1)
-	waitResult := make(chan error, 1)
-
-	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-
-		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-		err := cmd.Start()
-		started <- err
-		if err != nil {
-			close(waitResult)
-			return
-		}
-		waitResult <- cmd.Wait()
-		close(waitResult)
-	}()
-
-	if err := <-started; err != nil {
-		return nil, err
-	}
-	return waitResult, nil
-}
-
 // gstStage is one GStreamer element (or caps filter) followed by its arguments.
 // Keeping separators out of stages makes it difficult for source-specific
 // pipelines to accidentally diverge in the shared encoding path.
@@ -1086,7 +1098,10 @@ func systemMemoryStagingFormat(target string) string {
 // deliberately different raw layouts make the second videoconvert allocate a
 // fresh buffer even when the portal already supplies the encoder's format.
 func buildSystemWaylandVideoPipeline(fd int, nodeID uint32, fps int, encoder encoderResult, maxWidth, maxHeight int, timestampedOutput bool) []string {
-	args := append([]string{"--quiet"}, pipeWireVideoSourceStage(fd, nodeID, fps, false)...)
+	// Copy at the PipeWire source boundary so a downstream renegotiation cannot
+	// retain every compositor-owned buffer. This is especially important when a
+	// Hyprland window enters or leaves fullscreen and changes the stream size.
+	args := append([]string{"--quiet"}, pipeWireVideoSourceStage(fd, nodeID, fps, true)...)
 	// Desktop pixels are square. PipeWire otherwise exposes a broad PAR range,
 	// whose minimum makes videoscale calculate incorrect borders for tall regions.
 	args = appendGstStage(args, gstStage{"video/x-raw(ANY),pixel-aspect-ratio=1/1"})
@@ -1671,6 +1686,95 @@ func probeVideoCaptureStartup(ctx context.Context, capture *ScreenCapture, codec
 		<-resultCh
 		return fmt.Errorf("startup access-unit probe: %w", ctx.Err())
 	}
+}
+
+func windowsCaptureSourceStage(cfg CaptureConfig) gstStage {
+	source := gstStage{
+		"d3d11screencapturesrc",
+		fmt.Sprintf("show-cursor=%t", cfg.ShowCursor),
+	}
+	if cfg.WaylandSource == "window" {
+		source = append(source,
+			"capture-api=wgc",
+			fmt.Sprintf("window-handle=%d", cfg.WindowsWindowHandle),
+		)
+	} else {
+		source = append(source, "capture-api=dxgi")
+		if cfg.WindowsMonitorIndex >= 0 {
+			source = append(source, fmt.Sprintf("monitor-index=%d", cfg.WindowsMonitorIndex))
+		}
+	}
+	return source
+}
+
+func startPreparedWindowsCapture(startupCtx, lifetimeCtx context.Context, cfg CaptureConfig, encoder encoderResult, timestampedOutput bool) (*ScreenCapture, error) {
+	startupCtx, cancelStartup := context.WithTimeout(normalizeContext(startupCtx), captureStartupBudget)
+	defer cancelStartup()
+	lifetimeCtx = normalizeContext(lifetimeCtx)
+	captureCtx, cancel := context.WithCancel(lifetimeCtx)
+
+	fps := cfg.FPS
+	if fps <= 0 {
+		fps = 30
+	}
+
+	source := windowsCaptureSourceStage(cfg)
+	beforeConvert := []gstStage{frameRateStage(fps), lowLatencyVideoQueueStage()}
+	gstArgs := buildGstVideoPipeline(source, beforeConvert, nil, encoder, cfg.MaxWidth, cfg.MaxHeight, timestampedOutput)
+
+	dbg("[CAPTURE] gst-launch-1.0 (windows) %s", strings.Join(gstArgs, " "))
+	cmd := exec.CommandContext(captureCtx, "gst-launch-1.0", gstArgs...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("gst stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		_ = stdout.Close()
+		return nil, fmt.Errorf("gst stderr pipe: %w", err)
+	}
+
+	waitResult, err := startGStreamerCommand(cmd)
+	if err != nil {
+		cancel()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return nil, fmt.Errorf("start gst-launch: %w", err)
+	}
+
+	stderrTail := newCaptureStderrTail()
+	go logStderr("GST", stderr, stderrTail)
+	capture := &ScreenCapture{
+		cmd:      cmd,
+		stdout:   stdout,
+		cancel:   cancel,
+		waitCh:   make(chan struct{}),
+		stderr:   stderrTail,
+		pwNodeID: 0,
+	}
+	if timestampedOutput {
+		capture.frames = newRTPVideoAccessUnitReader(stdout, encoder.codec)
+	}
+	go func() {
+		capture.waitErr = <-waitResult
+		close(capture.waitCh)
+	}()
+
+	probeCtx, cancelProbe := context.WithTimeout(startupCtx, captureStartupProbeTimeout(fps))
+	err = probeVideoCaptureStartup(probeCtx, capture, encoder.codec, timestampedOutput)
+	cancelProbe()
+	if err != nil {
+		capture.Stop()
+		result := fmt.Errorf("Windows screen capture failed startup validation: %w", err)
+		if stderr := capture.stderrText(); stderr != "" {
+			result = fmt.Errorf("%w; GStreamer stderr: %s", result, stderr)
+		}
+		return nil, result
+	}
+
+	return capture, nil
 }
 
 func startPreparedX11Capture(startupCtx, lifetimeCtx context.Context, cfg CaptureConfig, encoder encoderResult, timestampedOutput bool) (*ScreenCapture, error) {
@@ -2436,7 +2540,7 @@ func normalizeContext(ctx context.Context) context.Context {
 // permission and returns a PipeWire node ID, an fd for the portal's PipeWire remote,
 // the retained portal session (which must stay open for capture and retries), and a
 // fresh restore token when the portal grants persistence.
-func requestScreencast(ctx context.Context, restoreToken string, showCursor bool, dimensions *[2]int) (uint32, *os.File, pipeWirePortalSession, string, error) {
+func requestScreencast(ctx context.Context, restoreToken string, showCursor bool, sourceTypes uint32, dimensions *[2]int) (uint32, *os.File, pipeWirePortalSession, string, error) {
 	ctx = normalizeContext(ctx)
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
@@ -2518,7 +2622,7 @@ func requestScreencast(ctx context.Context, restoreToken string, showCursor bool
 	}
 	selectOpts := map[string]dbus.Variant{
 		"handle_token": dbus.MakeVariant(selectToken),
-		"types":        dbus.MakeVariant(uint32(1)), // MONITOR=1, WINDOW=2
+		"types":        dbus.MakeVariant(sourceTypes), // MONITOR=1, WINDOW=2
 		"multiple":     dbus.MakeVariant(false),
 		"cursor_mode":  dbus.MakeVariant(cursorMode),
 	}
@@ -2625,6 +2729,23 @@ func requestScreencast(ctx context.Context, restoreToken string, showCursor bool
 		nodeID = nid
 		if len(streamList[0]) > 1 {
 			streamProperties, _ = streamList[0][1].(map[string]dbus.Variant)
+		}
+	}
+
+	// Some portal backends expose more choices than SelectSources requested.
+	// Refuse a mismatched selection instead of silently turning a stable monitor
+	// capture into a resizable window stream that can fail on fullscreen changes.
+	if sourceType, ok := streamProperties["source_type"]; ok {
+		actualType, valid := sourceType.Value().(uint32)
+		if valid {
+			dbg("[CAPTURE] portal source type: %d", actualType)
+			if actualType&sourceTypes == 0 {
+				requested := "monitor"
+				if sourceTypes == 2 {
+					requested = "window"
+				}
+				return 0, nil, nil, "", fmt.Errorf("portal returned source type %d; select a %s in the share picker", actualType, requested)
+			}
 		}
 	}
 

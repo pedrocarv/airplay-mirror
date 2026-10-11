@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AirPlay Mirror
+Comment=Mirror this computer to an AirPlay TV
+Exec=@EXEC@
+Icon=video-display-symbolic
+Terminal=false
+Categories=AudioVideo;Network;
+Keywords=AirPlay;Mirror;TV;Screen;Cast;
+StartupNotify=true

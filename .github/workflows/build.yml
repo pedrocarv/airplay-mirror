@@ -1,0 +1,35 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install packaging tool
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Test and build Linux and Windows packages
+        run: ./scripts/build-packages.sh "${GITHUB_SHA::7}"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: airplay-mirror-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
