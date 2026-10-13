@@ -4,6 +4,8 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+. (Join-Path $PSScriptRoot "Discovery.ps1")
+
 $script:EnginePath = Join-Path $PSScriptRoot "AirPlay.Engine.exe"
 $script:EngineProcess = $null
 $script:OutputRead = $null
@@ -312,7 +314,7 @@ function Finish-Discovery {
         return
     }
     try {
-        $devices = @($json | ConvertFrom-Json)
+        $devices = @(ConvertFrom-AirPlayDiscoveryJson -Json $json)
     } catch {
         $devices = @()
     }

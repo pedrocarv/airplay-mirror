@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  windows-ui:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Test receiver selection parsing in Windows PowerShell
+        shell: powershell
+        run: .\scripts\test-windows-discovery.ps1
+
   packages:
     runs-on: ubuntu-latest
     steps:

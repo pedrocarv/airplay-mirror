@@ -30,6 +30,7 @@ install -m 0644 README.md ATTRIBUTION.md LICENSE COPYING.GPL "$linux_root/"
 
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o "$windows_root/AirPlay.Engine.exe" ./cmd/doubletake
 install -m 0644 apps/windows/AirPlay.ps1 "$windows_root/AirPlay.ps1"
+install -m 0644 apps/windows/Discovery.ps1 "$windows_root/Discovery.ps1"
 install -m 0644 "apps/windows/Start AirPlay.cmd" "$windows_root/Start AirPlay.cmd"
 install -m 0644 "apps/windows/Install shortcut.ps1" "$windows_root/Install shortcut.ps1"
 install -m 0644 apps/windows/AirPlay.ico "$windows_root/AirPlay.ico"
