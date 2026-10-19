@@ -85,6 +85,7 @@ func main() {
 	x11WindowID := flag.String("x11-window-id", "", "X11 window id to capture, decimal or 0xhex")
 	x11WindowName := flag.String("x11-window-name", "", "X11 window name to capture; prefer -x11-window-id")
 	noCursor := flag.Bool("no-cursor", false, "Don't show the mouse cursor in the captured video")
+	matchReceiverAspect := flag.Bool("match-receiver-aspect", false, "Windows: while mirroring, switch the primary display to the receiver's aspect ratio so the picture fills it")
 	discoverJSON := flag.Bool("discover-json", false, "Discover AirPlay receivers for 5 seconds and print JSON")
 	flag.Parse()
 	if *discoverJSON {
@@ -427,6 +428,12 @@ func main() {
 	startedWidth, startedHeight := -1, -1
 	startedCodec := airplay.VideoCodec("")
 	var liveVideoLead time.Duration
+	var restoreDisplay func()
+	defer func() {
+		if restoreDisplay != nil {
+			restoreDisplay()
+		}
+	}()
 	prepareH264Fallback := func(cause error) error {
 		fallbackCfg := captureCfg
 		fallbackCfg.VideoCodec = airplay.VideoCodecH264
@@ -448,6 +455,15 @@ func main() {
 				return airplay.VideoPreparationResult{MinimumVideoLead: liveVideoLead}, nil
 			}
 			return airplay.VideoPreparationResult{}, fmt.Errorf("receiver changed video from %s %dx%d to %s %dx%d during setup", startedCodec, startedWidth, startedHeight, codec, width, height)
+		}
+		if *matchReceiverAspect && !*testMode && restoreDisplay == nil {
+			// Switch before capture starts, so Desktop Duplication attaches to the
+			// final mode instead of renegotiating mid-stream.
+			restore, err := airplay.MatchDisplayAspect(*windowsMonitorIndex, width, height)
+			if err != nil {
+				log.Printf("warning: keeping the current display mode: %v", err)
+			}
+			restoreDisplay = restore
 		}
 		startedCapture, startErr := capturePreparation.StartWithCodec(width, height, codec)
 		if startErr != nil {

@@ -46,7 +46,8 @@ jobs:
           $bin = "C:\Program Files\gstreamer\1.0\msvc_x86_64\bin"
           if (-not (Test-Path (Join-Path $bin "gst-launch-1.0.exe"))) { throw "GStreamer was not installed in $bin" }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
-          & (Join-Path $bin "gst-inspect-1.0.exe") d3d11convert | Select-Object -First 5
+          & (Join-Path $bin "gst-inspect-1.0.exe") d3d11convert > $null
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer has no d3d11convert element" }
 
       - name: Measure Windows screen capture
         shell: powershell

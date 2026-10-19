@@ -19,6 +19,20 @@ $script:SelectedDevices = @()
 # The Go engine writes UTF-8. Without this, receiver names containing non-ASCII
 # characters (such as typographic apostrophes) are decoded with the OEM code page.
 $script:EngineEncoding = New-Object System.Text.UTF8Encoding($false)
+$script:DisplayModeChanged = $false
+
+Add-Type -Namespace AirPlayMirror -Name Display -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+public static extern int ChangeDisplaySettingsEx(string deviceName, IntPtr devMode, IntPtr hwnd, uint flags, IntPtr param);
+'@
+
+# The engine switches the display with a temporary mode change and restores it
+# when mirroring ends. This resets it as well in case the engine was killed.
+function Restore-DisplayMode {
+    if (-not $script:DisplayModeChanged) { return }
+    $script:DisplayModeChanged = $false
+    [void][AirPlayMirror.Display]::ChangeDisplaySettingsEx($null, [IntPtr]::Zero, [IntPtr]::Zero, 0, [IntPtr]::Zero)
+}
 
 $ColorBackground = [System.Drawing.Color]::FromArgb(18, 20, 28)
 $ColorCard = [System.Drawing.Color]::FromArgb(31, 35, 47)
@@ -224,6 +238,7 @@ function Set-RunningUI {
     $displayCombo.Enabled = -not $Running
     $audioCheck.Enabled = -not $Running
     $cursorCheck.Enabled = -not $Running
+    $fillCheck.Enabled = -not $Running
     $fpsCombo.Enabled = -not $Running
     $refreshButton.Enabled = -not $Running
 }
@@ -239,6 +254,7 @@ function Stop-Mirroring {
     $script:EngineProcess = $null
     $script:OutputRead = $null
     $script:ErrorRead = $null
+    Restore-DisplayMode
     $credentialPanel.Visible = $false
     Set-RunningUI $false
     Set-Status "Ready"
@@ -273,6 +289,10 @@ function Start-Mirroring {
     )
     if (-not $audioCheck.Checked) { $arguments += "-no-audio" }
     if (-not $cursorCheck.Checked) { $arguments += "-no-cursor" }
+    if ($fillCheck.Checked -and $monitorIndex -lt 0) {
+        $arguments += "-match-receiver-aspect"
+        $script:DisplayModeChanged = $true
+    }
 
     $logBox.Clear()
     Append-Log "Connecting to $($device.name) at $($device.ip):$($device.port)...`r`n"
@@ -523,7 +543,15 @@ $cursorCheck.Size = New-Object System.Drawing.Size(190, 28)
 $cursorCheck.ForeColor = $ColorText
 $cursorCheck.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $optionsCard.Controls.Add($cursorCheck)
-$optionsCard.Controls.Add((New-Label "The TV's current volume is preserved automatically." 22 145 540 26 9.5 ([System.Drawing.FontStyle]::Regular) $ColorMuted))
+$fillCheck = New-Object System.Windows.Forms.CheckBox
+$fillCheck.Text = "Fill the TV (switch this PC to the TV's shape while mirroring)"
+$fillCheck.Checked = $true
+$fillCheck.Location = New-Object System.Drawing.Point(420, 140)
+$fillCheck.Size = New-Object System.Drawing.Size(410, 28)
+$fillCheck.ForeColor = $ColorText
+$fillCheck.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$optionsCard.Controls.Add($fillCheck)
+$optionsCard.Controls.Add((New-Label "The TV's current volume is preserved automatically." 22 145 380 26 9.5 ([System.Drawing.FontStyle]::Regular) $ColorMuted))
 
 $startButton = New-Object System.Windows.Forms.Button
 $startButton.Text = "Start mirroring"
@@ -595,6 +623,7 @@ $pollTimer.Add_Tick({
             $script:EngineProcess = $null
             $script:OutputRead = $null
             $script:ErrorRead = $null
+            Restore-DisplayMode
             $credentialPanel.Visible = $false
             Set-RunningUI $false
             if ($exitCode -eq 0) {
@@ -612,6 +641,7 @@ $form.Add_FormClosing({
     if ($script:EngineProcess -and -not $script:EngineProcess.HasExited) {
         try { & taskkill.exe /PID $script:EngineProcess.Id /T /F 2>$null | Out-Null } catch { }
     }
+    Restore-DisplayMode
 })
 $form.Add_Shown({ Start-Discovery })
 [void]$form.ShowDialog()
