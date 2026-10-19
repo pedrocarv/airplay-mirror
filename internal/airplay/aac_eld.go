@@ -146,17 +146,27 @@ func newELDEncoder() (*eldEncoder, error) {
 	}
 	e.handle = *handle
 
-	for _, param := range [...]struct{ name, value uintptr }{
-		{fdkParamAOT, fdkAOTERAACELD},
-		{fdkParamSampleRate, audioSampleRate},
-		{fdkParamChannelMode, fdkChannelModeStereo},
-		{fdkParamChannelOrder, 1},
-		{fdkParamBitrate, 256000},
-		{fdkParamTransmux, fdkTransportMP4Raw},
-		{fdkParamSBRMode, 0},
-		{fdkParamGranuleLength, 480},
+	for _, param := range [...]struct {
+		name, value uintptr
+		optional    bool
+	}{
+		{fdkParamAOT, fdkAOTERAACELD, false},
+		{fdkParamSampleRate, audioSampleRate, false},
+		{fdkParamChannelMode, fdkChannelModeStereo, false},
+		{fdkParamChannelOrder, 1, false},
+		{fdkParamBitrate, 256000, false},
+		{fdkParamTransmux, fdkTransportMP4Raw, false},
+		// SBR is already off by default for AAC-ELD, and fdk-aac 2.0.2 (Ubuntu
+		// 24.04) rejects setting it explicitly. The frame-length check below
+		// rejects any configuration that is not plain 480-sample AAC-ELD.
+		{fdkParamSBRMode, 0, true},
+		{fdkParamGranuleLength, 480, false},
 	} {
 		if result := fdkCall(library.setParam, e.handle, param.name, param.value); int32(result) != fdkAACENCOK {
+			if param.optional {
+				dbg("[AUDIO] AAC-ELD encoder ignored parameter 0x%04x: FDK error %d", param.name, int32(result))
+				continue
+			}
 			e.Close()
 			return nil, fmt.Errorf("configure AAC-ELD encoder parameter 0x%04x: FDK error %d", param.name, int32(result))
 		}
