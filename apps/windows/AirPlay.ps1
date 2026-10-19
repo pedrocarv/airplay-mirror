@@ -14,6 +14,7 @@ $script:PromptTail = ""
 $script:DiscoveryProcess = $null
 $script:DiscoveryTask = $null
 $script:DiscoveryErrorTask = $null
+$script:DiscoveryRepairOffered = $false
 $script:SelectedDevices = @()
 
 $ColorBackground = [System.Drawing.Color]::FromArgb(18, 20, 28)
@@ -124,6 +125,27 @@ function Set-Status {
         "working"   { $statusPill.BackColor = $ColorAmber; $statusPill.ForeColor = [System.Drawing.Color]::FromArgb(57, 39, 8) }
         default     { $statusPill.BackColor = [System.Drawing.Color]::FromArgb(77, 82, 101); $statusPill.ForeColor = $ColorText }
     }
+}
+
+function Repair-DiscoveryAccess {
+    $repairScript = Join-Path $PSScriptRoot "Repair discovery.ps1"
+    if (-not (Test-Path $repairScript)) {
+        Append-Log "Discovery repair tool is missing. Extract the complete release ZIP.`r`n"
+        return $false
+    }
+
+    $arguments = "-NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$repairScript`" -EnginePath `"$script:EnginePath`""
+    try {
+        $repair = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+        if ($repair.ExitCode -eq 0) {
+            Append-Log "Windows Firewall access repaired. Retrying discovery...`r`n"
+            return $true
+        }
+        Append-Log "Windows Firewall repair exited with status $($repair.ExitCode).`r`n"
+    } catch {
+        Append-Log "Windows Firewall repair was not completed: $($_.Exception.Message)`r`n"
+    }
+    return $false
 }
 
 function New-ReadState {
@@ -305,6 +327,7 @@ function Finish-Discovery {
     $refreshButton.Enabled = $true
     $deviceCombo.Items.Clear()
     $script:SelectedDevices = @()
+    $retryDiscovery = $false
 
     if ($exitCode -ne 0) {
         $deviceCombo.Items.Add("No receivers found") | Out-Null
@@ -341,9 +364,24 @@ function Finish-Discovery {
             Append-Log "Raw discovery output: $($json.Trim())`r`n"
         } else {
             Append-Log "Discovery completed without finding a receiver.`r`n"
+            if (-not $script:DiscoveryRepairOffered) {
+                $script:DiscoveryRepairOffered = $true
+                $choice = [System.Windows.Forms.MessageBox]::Show(
+                    "Windows may be blocking AirPlay discovery after the app update. Repair private-network access and search again? Windows will ask for administrator approval.",
+                    "Repair AirPlay discovery",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Information
+                )
+                if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    $retryDiscovery = Repair-DiscoveryAccess
+                }
+            }
         }
     }
     Set-Status "Ready"
+    if ($retryDiscovery) {
+        Start-Discovery
+    }
 }
 
 if (-not (Test-Path $script:EnginePath)) {

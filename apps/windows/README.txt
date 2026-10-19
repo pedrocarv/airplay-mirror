@@ -30,6 +30,8 @@ Notes
   .config\doubletake\credentials.json
 * Windows may ask for network access the first time. Allow Private networks so
   AirPlay discovery can see TVs on your home network.
+* If an update causes discovery to return no TVs, the app can repair its
+  private-network firewall permission and retry after administrator approval.
 
 Source: https://github.com/pedrocarv/airplay-mirror
 License: GNU Lesser General Public License v3.0

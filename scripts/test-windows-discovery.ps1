@@ -1,6 +1,24 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
+
+foreach ($relativePath in @(
+    "apps\windows\AirPlay.ps1",
+    "apps\windows\Discovery.ps1",
+    "apps\windows\Repair discovery.ps1"
+)) {
+    $tokens = $null
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $repoRoot $relativePath),
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
+    if ($parseErrors.Count -gt 0) {
+        throw "PowerShell syntax error in ${relativePath}: $($parseErrors[0].Message)"
+    }
+}
+
 . (Join-Path $repoRoot "apps\windows\Discovery.ps1")
 
 $twoReceivers = @'
