@@ -5,7 +5,8 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 foreach ($relativePath in @(
     "apps\windows\AirPlay.ps1",
     "apps\windows\Discovery.ps1",
-    "apps\windows\Repair discovery.ps1"
+    "apps\windows\Repair discovery.ps1",
+    "apps\windows\Install shortcut.ps1"
 )) {
     $tokens = $null
     $parseErrors = $null

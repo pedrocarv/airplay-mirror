@@ -16,6 +16,9 @@ $script:DiscoveryTask = $null
 $script:DiscoveryErrorTask = $null
 $script:DiscoveryRepairOffered = $false
 $script:SelectedDevices = @()
+# The Go engine writes UTF-8. Without this, receiver names containing non-ASCII
+# characters (such as typographic apostrophes) are decoded with the OEM code page.
+$script:EngineEncoding = New-Object System.Text.UTF8Encoding($false)
 
 $ColorBackground = [System.Drawing.Color]::FromArgb(18, 20, 28)
 $ColorCard = [System.Drawing.Color]::FromArgb(31, 35, 47)
@@ -77,6 +80,10 @@ function Find-GStreamerBin {
 }
 
 function Test-GStreamer {
+    # Windows PowerShell 5.1 turns redirected native stderr into error records,
+    # and the script-wide Stop preference would make GStreamer's plugin-loading
+    # warnings abort this check. Exit codes are inspected explicitly below.
+    $ErrorActionPreference = "Continue"
     if (-not (Find-GStreamerBin)) {
         $choice = [System.Windows.Forms.MessageBox]::Show(
             "AirPlay needs the 64-bit GStreamer MSVC runtime (Complete install). Open the official download page now?",
@@ -266,6 +273,8 @@ function Start-Mirroring {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = $script:EngineEncoding
+    $psi.StandardErrorEncoding = $script:EngineEncoding
 
     try {
         $script:EngineProcess = New-Object System.Diagnostics.Process
@@ -301,6 +310,8 @@ function Start-Discovery {
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = $script:EngineEncoding
+    $psi.StandardErrorEncoding = $script:EngineEncoding
     try {
         $script:DiscoveryProcess = New-Object System.Diagnostics.Process
         $script:DiscoveryProcess.StartInfo = $psi
