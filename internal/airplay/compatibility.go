@@ -50,9 +50,13 @@ const (
 )
 
 func compatibilityForReceiver(info *ReceiverInfo, encrypted, audioEnabled bool) (receiverCompatibility, error) {
-	audioCodec, err := screenAudioCodec(info, aacELDEncoderAvailable || !audioEnabled)
+	audioCodec, err := screenAudioCodec(info, aacELDEncoderAvailable() || !audioEnabled)
 	if err != nil && audioEnabled {
 		return receiverCompatibility{}, err
+	}
+	if err == nil && audioEnabled && audioCodec == AudioCodecALAC && info != nil &&
+		uint64(info.effectiveSupportedFormats().ScreenStream)&screenAudioFormatAACELD44100Stereo != 0 {
+		warnAACELDUnavailable()
 	}
 	if err != nil {
 		// A video-only session still creates AirPlay's screen-audio descriptor so

@@ -39,6 +39,8 @@ install -m 0644 apps/windows/AirPlay.svg "$windows_root/AirPlay.svg"
 install -m 0644 apps/windows/README.txt "$windows_root/README.txt"
 install -m 0644 ATTRIBUTION.md "$windows_root/SOURCE.txt"
 install -m 0644 LICENSE "$windows_root/LICENSE.txt"
+# AAC-ELD screen audio: the engine loads this DLL at run time.
+"$script_dir/build-fdk-aac-windows.sh" "$windows_root"
 
 tar -C "$work_root" -czf "$dist_root/$linux_name.tar.gz" "$linux_name"
 (

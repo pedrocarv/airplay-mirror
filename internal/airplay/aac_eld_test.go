@@ -1,18 +1,36 @@
-//go:build cgo && fdk_aac
-
 package airplay
 
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"os"
 	"testing"
 )
 
-func TestFDKAACELDEncodesRawFrame(t *testing.T) {
-	if !aacELDEncoderAvailable {
-		t.Fatal("FDK build did not advertise its AAC-ELD encoder")
+// requireAACELD skips tests that need libfdk-aac when it is not installed.
+// CI sets DOUBLETAKE_REQUIRE_FDK_AAC=1 so a missing or unloadable library
+// fails instead.
+func requireAACELD(t *testing.T) {
+	t.Helper()
+	if _, err := loadFDKAAC(); err != nil {
+		if os.Getenv("DOUBLETAKE_REQUIRE_FDK_AAC") == "1" {
+			t.Fatalf("AAC-ELD encoder required but unavailable: %v", err)
+		}
+		t.Skipf("AAC-ELD encoder unavailable: %v", err)
 	}
+}
+
+func TestFDKAACLoaderReportsMissingLibrary(t *testing.T) {
+	_, err := loadFDKAACFrom([]string{"/nonexistent/libfdk-aac-missing.so"})
+	if !errors.Is(err, ErrAACELDUnavailable) {
+		t.Fatalf("load error = %v, want ErrAACELDUnavailable", err)
+	}
+}
+
+func TestFDKAACELDEncodesRawFrame(t *testing.T) {
+	requireAACELD(t)
 	encoder, err := newELDEncoder()
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +51,7 @@ func TestFDKAACELDEncodesRawFrame(t *testing.T) {
 }
 
 func TestFDKAACELDUsesNegotiatedRedundancyFormats(t *testing.T) {
+	requireAACELD(t)
 	legacyStream, legacyPackets := streamAudioPacketsForCodecTest(t, "AES", nil, 4, AudioCodecAACELD, false)
 	assertAudioPacketSequences(t, legacyPackets, []uint16{1, 1, 2, 1, 2, 3, 2, 3, 4})
 	originals := make(map[uint16][]byte)

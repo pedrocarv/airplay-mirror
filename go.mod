@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/aead/chacha20poly1305 v0.0.0-20201124145622-1a5aba2a8b29
+	github.com/ebitengine/purego v0.11.2
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/libp2p/zeroconf/v2 v2.2.0
 	github.com/zalando/go-keyring v0.2.8

@@ -827,7 +827,7 @@ func TestReceiverServerAdvertisesCapabilityAxes(t *testing.T) {
 
 func TestLoggedReceiverProfilesSelectAvailablePreferredAudio(t *testing.T) {
 	wantCodec := AudioCodecALAC
-	if aacELDEncoderAvailable {
+	if aacELDEncoderAvailable() {
 		wantCodec = AudioCodecAACELD
 	}
 	for _, test := range []struct {

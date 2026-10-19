@@ -11,6 +11,7 @@ permissions:
 jobs:
   windows-ui:
     runs-on: windows-latest
+    needs: packages
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -35,6 +36,21 @@ jobs:
         shell: powershell
         run: .\scripts\test-windows-discovery.ps1
 
+      - name: Download packages
+        uses: actions/download-artifact@v7
+        with:
+          name: airplay-mirror-${{ github.sha }}
+          path: packages
+
+      - name: Test AAC-ELD encoding with the packaged fdk-aac DLL
+        shell: powershell
+        run: |
+          $zip = Get-ChildItem packages -Filter 'airplay-mirror-windows-x64-*.zip' | Select-Object -First 1
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath packages\windows
+          $env:DOUBLETAKE_FDK_AAC = (Get-ChildItem packages\windows -Recurse -Filter libfdk-aac-2.dll | Select-Object -First 1).FullName
+          $env:DOUBLETAKE_REQUIRE_FDK_AAC = "1"
+          go test ./internal/airplay -run 'FDK|AACELD|SelectAvailablePreferredAudio' -v
+
   packages:
     runs-on: ubuntu-latest
     steps:
@@ -47,10 +63,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install packaging tool
-        run: sudo apt-get update && sudo apt-get install -y zip
+      - name: Install packaging tools and libfdk-aac
+        run: sudo apt-get update && sudo apt-get install -y zip cmake mingw-w64 libfdk-aac2
 
       - name: Test and build Linux and Windows packages
+        env:
+          DOUBLETAKE_REQUIRE_FDK_AAC: "1"
         run: ./scripts/build-packages.sh "${GITHUB_SHA::7}"
 
       - name: Upload packages

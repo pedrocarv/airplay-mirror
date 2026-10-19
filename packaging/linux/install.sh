@@ -49,3 +49,10 @@ chmod 0644 "$desktop_file"
 
 echo "AirPlay Mirror is installed. Launch it from your app menu or run:"
 echo "  $launcher"
+
+if ! ldconfig -p 2>/dev/null | grep 'libfdk-aac\.so\.2' >/dev/null; then
+  echo
+  echo "Note: libfdk-aac was not found. Install it for AAC-ELD audio; without it,"
+  echo "some TVs (for example Sony Google TVs) mirror video but play no sound."
+  echo "  Arch: libfdk-aac   Debian/Ubuntu: libfdk-aac2   Fedora: fdk-aac (RPM Fusion)"
+fi

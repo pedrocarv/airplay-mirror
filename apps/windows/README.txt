@@ -26,6 +26,10 @@ Notes
 * The receiver's current volume is preserved.
 * Video uses Direct3D 11 desktop capture.
 * Desktop sound uses Windows WASAPI loopback capture.
+* libfdk-aac-2.dll provides the AAC-ELD audio codec many TVs require. It is
+  the Fraunhofer FDK AAC library, covered by its own license in
+  FDK-AAC-LICENSE.txt, which grants no patent rights. Keep it next to
+  AirPlay.Engine.exe; without it the app falls back to ALAC audio.
 * Pairing credentials are stored under your Windows user profile in:
   .config\doubletake\credentials.json
 * Windows may ask for network access the first time. Allow access so

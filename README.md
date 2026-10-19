@@ -23,6 +23,7 @@ Download the latest Linux or Windows package from [Releases](https://github.com/
 - A modern x86-64 Linux desktop using Wayland or X11
 - GStreamer with the base, good, bad, and ugly plugin sets
 - PipeWire or PulseAudio for desktop audio
+- libfdk-aac for AAC-ELD screen audio. Some TVs, including Sony Google TVs, accept the ALAC fallback but play no sound without it
 - GTK 4, libadwaita, and PyGObject for the graphical app
 - The XDG desktop portal and an appropriate screencast backend when using Wayland
 - Go 1.25 or newer when building from source
@@ -31,8 +32,10 @@ On Arch Linux and Omarchy, the core packages can be installed with:
 
 ```bash
 sudo pacman -S --needed go gstreamer gst-plugins-base gst-plugins-good \
-  gst-plugins-bad gst-plugins-ugly gtk4 libadwaita python-gobject
+  gst-plugins-bad gst-plugins-ugly gtk4 libadwaita python-gobject libfdk-aac
 ```
+
+On Debian and Ubuntu, libfdk-aac is the `libfdk-aac2` package from the non-free (Debian) or multiverse (Ubuntu) component. On Fedora it is `fdk-aac` from RPM Fusion.
 
 Build and install from a repository checkout:
 
@@ -58,7 +61,7 @@ When the portal picker opens, select the physical display you want to mirror. Se
 
 Install GStreamer from the [official Windows download page](https://gstreamer.freedesktop.org/download/#windows), extract the Windows release ZIP, and double-click `Start AirPlay.cmd`. The app checks for the required GStreamer elements before starting a stream.
 
-The Windows build uses Direct3D 11 desktop capture and WASAPI loopback audio. Windows may ask for network access on first launch; allow it so receiver discovery can work. Campus and office networks are usually classified as Public, so allow that profile too. If no receivers are found, the app offers to repair its firewall permission.
+The Windows build uses Direct3D 11 desktop capture and WASAPI loopback audio. The release ZIP includes `libfdk-aac-2.dll` for AAC-ELD screen audio; keep it next to `AirPlay.Engine.exe`. Windows may ask for network access on first launch; allow it so receiver discovery can work. Campus and office networks are usually classified as Public, so allow that profile too. If no receivers are found, the app offers to repair its firewall permission.
 
 ## Build packages locally
 
@@ -68,7 +71,7 @@ The packaging script runs the test suite, builds both engines, and writes archiv
 ./scripts/build-packages.sh v0.1.0
 ```
 
-`zip` is required to create the Windows archive.
+`zip`, `cmake`, and a MinGW-w64 cross-compiler (`x86_64-w64-mingw32-gcc`/`g++`) are required to create the Windows archive; the script cross-compiles `libfdk-aac-2.dll` from a checksum-pinned fdk-aac release.
 
 ## Command-line engine
 
@@ -93,3 +96,5 @@ This is an independent project and is not affiliated with or endorsed by Apple I
 ## License and attribution
 
 AirPlay Mirror is distributed under the GNU Lesser General Public License v3.0. It is derived from Doubletake; see [ATTRIBUTION.md](ATTRIBUTION.md) and [LICENSE](LICENSE).
+
+AAC-ELD audio uses the Fraunhofer FDK AAC library, which is not part of AirPlay Mirror and is covered by its own license. The engine loads it at run time; the Windows package distributes an unmodified build of it as `libfdk-aac-2.dll` with that license in `FDK-AAC-LICENSE.txt`. The FDK AAC license grants no patent rights; AAC patent licensing is the responsibility of the user.
