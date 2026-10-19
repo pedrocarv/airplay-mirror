@@ -19,6 +19,7 @@ env:
 jobs:
   capture:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -34,10 +35,14 @@ jobs:
         run: |
           $installer = Join-Path $env:RUNNER_TEMP "gstreamer.exe"
           $url = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GSTREAMER_VERSION/msvc/gstreamer-1.0-msvc-x86_64-$env:GSTREAMER_VERSION.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
+          # Invoke-WebRequest's progress rendering makes large downloads crawl in
+          # Windows PowerShell; curl.exe ships with Windows.
+          curl.exe --fail --silent --show-error --location --output $installer $url
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer download failed" }
           $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
           if ($hash -ne $env:GSTREAMER_SHA256) { throw "GStreamer installer checksum mismatch: $hash" }
-          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TYPE=runtime" -Wait
+          $setup = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/TYPE=runtime", "/LOG=$env:RUNNER_TEMP\gstreamer-install.log" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\gstreamer-install.log" -Tail 40; throw "GStreamer installer exited with $($setup.ExitCode)" }
           $bin = "C:\Program Files\gstreamer\1.0\msvc_x86_64\bin"
           if (-not (Test-Path (Join-Path $bin "gst-launch-1.0.exe"))) { throw "GStreamer was not installed in $bin" }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
