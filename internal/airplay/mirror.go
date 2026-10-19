@@ -46,11 +46,17 @@ type mediaClock struct {
 	timelineID      uint64
 }
 
+// errPTPClockIDMissing reports a receiver that advertises PTP but does not
+// identify its timeline in SETUP. Some TV implementations (observed on Sony's
+// AirTunes/377.30) accept a PTP session this way yet never supply a ClockID,
+// while still mirroring correctly with NTP timing.
+var errPTPClockIDMissing = errors.New("SETUP response omitted timingPeerInfo.ClockID")
+
 func (c *mediaClock) configureFromSetup(response map[string]interface{}, headers map[string]string, receivedAt time.Time) error {
 	peer, _ := response["timingPeerInfo"].(map[string]interface{})
 	timelineID := plistUint64(peer["ClockID"])
 	if timelineID == 0 {
-		return fmt.Errorf("SETUP response omitted timingPeerInfo.ClockID")
+		return errPTPClockIDMissing
 	}
 
 	anchorTimestamp, receivedMillis, processingMillis, err := receiverClockTimestamp(headers)
@@ -460,8 +466,20 @@ func (c *AirPlayClient) closeUnsafeMirrorControlConnection() {
 	}
 }
 
-// setupMirrorSession negotiates the mirroring stream with the Apple TV.
+// setupMirrorSession negotiates the mirroring stream with the Apple TV. A
+// receiver that advertises PTP but cannot identify its PTP clock is retried
+// once with NTP timing; the failed attempt has already been torn down.
 func (c *AirPlayClient) setupMirrorSession(ctx context.Context, cfg StreamConfig, prepareVideoCapture func(width, height int, codec VideoCodec) (VideoPreparationResult, error), captureMayReportMinimumLead bool) (*MirrorSession, error) {
+	session, err := c.setupMirrorSessionWithTiming(ctx, cfg, prepareVideoCapture, captureMayReportMinimumLead)
+	if err == nil || c.ptpUnavailable || !errors.Is(err, errPTPClockIDMissing) {
+		return session, err
+	}
+	c.ptpUnavailable = true
+	log.Printf("receiver advertises PTP but did not identify its clock; retrying with NTP timing")
+	return c.setupMirrorSessionWithTiming(ctx, cfg, prepareVideoCapture, captureMayReportMinimumLead)
+}
+
+func (c *AirPlayClient) setupMirrorSessionWithTiming(ctx context.Context, cfg StreamConfig, prepareVideoCapture func(width, height int, codec VideoCodec) (VideoPreparationResult, error), captureMayReportMinimumLead bool) (*MirrorSession, error) {
 	if err := ValidateVideoCodec(string(cfg.VideoCodec)); err != nil {
 		return nil, err
 	}
@@ -471,6 +489,9 @@ func (c *AirPlayClient) setupMirrorSession(ctx context.Context, cfg StreamConfig
 	policy, err := compatibilityForReceiver(c.info, c.encrypted, !cfg.NoAudio)
 	if err != nil {
 		return nil, fmt.Errorf("negotiate screen audio: %w", err)
+	}
+	if c.ptpUnavailable {
+		policy.timing = timingProtocolNTP
 	}
 	sourceVersion := policy.sourceVersion()
 	timingProtocol := policy.timing

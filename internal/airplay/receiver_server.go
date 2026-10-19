@@ -33,6 +33,7 @@ const (
 	ReceiverProfileModern    ReceiverProfile = "modern"
 	ReceiverProfileRoku      ReceiverProfile = "roku"
 	ReceiverProfileLG        ReceiverProfile = "lg"
+	ReceiverProfileSony      ReceiverProfile = "sony"
 	ReceiverProfileAppleTV3  ReceiverProfile = "appletv3"
 	ReceiverProfileUxPlay    ReceiverProfile = "uxplay"
 	ReceiverProfileAirServer ReceiverProfile = "airserver"
@@ -137,6 +138,7 @@ type receiverProfileSpec struct {
 	ntpInitiator             receiverNTPInitiator
 	advertisePTPInfo         bool
 	providePTPClockIdentity  bool
+	ptpWithoutClockIdentity  bool // accept PTP but omit ClockID, as Sony's AirTunes/377.30 does
 	providePTPClockHeaders   bool
 	audioConnectionsWithHAP  bool
 	audioResponseConnections bool
@@ -375,6 +377,27 @@ func receiverProfile(profile ReceiverProfile) (receiverProfileSpec, error) {
 			displayWidth:            1920,
 			displayHeight:           1080,
 		}, nil
+	case ReceiverProfileSony:
+		return receiverProfileSpec{
+			name:                    "doubletake Sony test receiver",
+			manufacturer:            "Sony",
+			model:                   "KD-50X85K",
+			sourceVersion:           "377.30.02",
+			features:                uint64(0x018bcf46007f8ad0),
+			pairing:                 receiverPairingLegacyHAP,
+			setupOrder:              receiverSetupSessionFirst,
+			timingProtocol:          timingProtocolNTP,
+			ntpInitiator:            receiverNTPReceiver,
+			advertisePTPInfo:        true,
+			ptpWithoutClockIdentity: true,
+			audioCodec:              AudioCodecALAC,
+			supportedScreenFormats:  0x40000,
+			audioSHKWithHAP:         true,
+			displayWidth:            1920,
+			displayHeight:           1080,
+			displayMaxWidth:         3840,
+			displayMaxHeight:        2160,
+		}, nil
 	case ReceiverProfileAppleTV3:
 		return receiverProfileSpec{
 			name:                   "doubletake legacy Apple TV test receiver",
@@ -543,6 +566,7 @@ type receiverConnection struct {
 	hap               *receiverHAPStream
 	media             *receiverMediaSession
 	timingProbed      bool
+	sessionTiming     string
 	legacyFairPlayKey [16]byte
 	legacyFairPlayIV  []byte
 	legacyFairPlaySet bool
@@ -997,6 +1021,13 @@ func (c *receiverConnection) handleSetup(request receiverRequest) receiverRespon
 			"SupportsClockPortMatchingOverride": true,
 		}
 	}
+	if kind == receiverSetupControl && c.sessionTiming == timingProtocolPTP && c.server.profile.ptpWithoutClockIdentity {
+		response["timingPeerInfo"] = map[string]any{
+			"ID":                                c.server.identifier,
+			"Addresses":                         []any{controlLocalIP(c.conn)},
+			"SupportsClockPortMatchingOverride": false,
+		}
+	}
 	if c.server.profile.timingProtocol == timingProtocolNTP && c.server.profile.ntpInitiator == receiverNTPSender {
 		response["timingPort"] = int64(endpoints.TimingPort)
 	}
@@ -1080,10 +1111,15 @@ func (c *receiverConnection) validateSetup(setup map[string]any, streams []map[s
 
 	if hasSession {
 		protocol, _ := setup["timingProtocol"].(string)
-		if protocol != profile.timingProtocol {
-			return fmt.Errorf("timingProtocol is %q, want %q", protocol, profile.timingProtocol)
+		want := profile.timingProtocol
+		if protocol == timingProtocolPTP && profile.ptpWithoutClockIdentity {
+			want = timingProtocolPTP
 		}
-		switch profile.timingProtocol {
+		if protocol != want {
+			return fmt.Errorf("timingProtocol is %q, want %q", protocol, want)
+		}
+		c.sessionTiming = protocol
+		switch want {
 		case timingProtocolNTP:
 			if plistInt(setup["timingPort"]) <= 0 {
 				return fmt.Errorf("NTP SETUP omitted timingPort")
@@ -1198,7 +1234,7 @@ func receiverSetupKindForStreams(streams []map[string]any) (receiverSetupKind, e
 func (c *receiverConnection) nextSetupState(kind receiverSetupKind) (receiverSessionState, error) {
 	if c.server.profile.setupOrder == receiverSetupSessionFirst {
 		switch {
-		case c.sessionState == receiverSessionInitial && kind == receiverSetupControl:
+		case c.sessionState.acceptsNewSession() && kind == receiverSetupControl:
 			return receiverSessionControlPrepared, nil
 		case c.sessionState == receiverSessionControlPrepared && kind == receiverSetupAudio:
 			return receiverSessionAudioPrepared, nil
@@ -1207,13 +1243,20 @@ func (c *receiverConnection) nextSetupState(kind receiverSetupKind) (receiverSes
 		}
 	} else {
 		switch {
-		case c.sessionState == receiverSessionInitial && kind == receiverSetupAudio:
+		case c.sessionState.acceptsNewSession() && kind == receiverSetupAudio:
 			return receiverSessionAudioPrepared, nil
 		case c.sessionState == receiverSessionAudioPrepared && kind == receiverSetupVideo:
 			return receiverSessionVideoPrepared, nil
 		}
 	}
 	return 0, fmt.Errorf("SETUP is not valid in receiver session state %d", c.sessionState)
+}
+
+// acceptsNewSession reports whether a session-creating SETUP is valid. Real
+// receivers accept a fresh session on the same control connection after
+// TEARDOWN; the sender relies on that to retry a rejected timing protocol.
+func (s receiverSessionState) acceptsNewSession() bool {
+	return s == receiverSessionInitial || s == receiverSessionTornDown
 }
 
 func (c *receiverConnection) handleRecord() receiverResponse {

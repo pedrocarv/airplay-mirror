@@ -19,6 +19,7 @@ func TestParseReceiverProfile(t *testing.T) {
 		{input: "modern", want: airplay.ReceiverProfileModern},
 		{input: " MODERN ", want: airplay.ReceiverProfileModern},
 		{input: "lg", want: airplay.ReceiverProfileLG},
+		{input: " Sony ", want: airplay.ReceiverProfileSony},
 		{input: "appletv3", want: airplay.ReceiverProfileAppleTV3},
 		{input: " UxPlay ", want: airplay.ReceiverProfileUxPlay},
 		{input: "airserver", want: airplay.ReceiverProfileAirServer},

@@ -27,10 +27,14 @@ func TestReceiverServerEndToEndProfiles(t *testing.T) {
 		wantFairPlay  uint64
 		wantTiming    uint64
 		wantEvents    uint64
+		// wantTeardowns counts the failed-attempt TEARDOWN as well as the
+		// session close; zero means only the close.
+		wantTeardowns uint64
 	}{
 		{name: "modern Apple HAP accepts control-first PTP", profile: ReceiverProfileModern, wantEncrypted: true, wantSetups: 3, wantFairPlay: 2, wantEvents: 1},
 		{name: "Roku raw negotiates media-first receiver-initiated NTP", profile: ReceiverProfileRoku, wantSetups: 3, wantTiming: 3, wantEvents: 1},
 		{name: "LG HAP negotiates media-first PTP", profile: ReceiverProfileLG, wantEncrypted: true, wantSetups: 3, wantEvents: 1},
+		{name: "Sony HAP retries PTP without ClockID as NTP", profile: ReceiverProfileSony, wantEncrypted: true, wantSetups: 4, wantTiming: 3, wantEvents: 1, wantTeardowns: 2},
 		{name: "AppleTV3 raw negotiates media-first receiver-initiated NTP", profile: ReceiverProfileAppleTV3, wantSetups: 3, wantFairPlay: 2, wantTiming: 3, wantEvents: 1},
 		{name: "UxPlay legacy accepts control-first without eventPort", profile: ReceiverProfileUxPlay, wantSetups: 3, wantFairPlay: 2, wantTiming: 3},
 		{name: "AirServer raw control-first with descriptor retry", profile: ReceiverProfileAirServer, wantSetups: 4, wantFairPlay: 2, wantTiming: 3, wantEvents: 1},
@@ -87,7 +91,11 @@ func TestReceiverServerEndToEndProfiles(t *testing.T) {
 			if stats.SetupRequests != test.wantSetups {
 				t.Fatalf("SETUP requests = %d, want %d", stats.SetupRequests, test.wantSetups)
 			}
-			if stats.RecordRequests != 1 || stats.FeedbackRequests < 1 || stats.TeardownRequests != 1 {
+			wantTeardowns := test.wantTeardowns
+			if wantTeardowns == 0 {
+				wantTeardowns = 1
+			}
+			if stats.RecordRequests != 1 || stats.FeedbackRequests < 1 || stats.TeardownRequests != wantTeardowns {
 				t.Fatalf("control stats = %+v", stats)
 			}
 			if stats.FairPlayRequests != test.wantFairPlay {

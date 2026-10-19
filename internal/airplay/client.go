@@ -350,6 +350,11 @@ type AirPlayClient struct {
 	sessionID string // X-Apple-Session-ID, set once per connection
 	PairingID string // Our pairing identifier (UUID)
 	pairType  int    // X-Apple-HKP pairing type for the current exchange
+
+	// ptpUnavailable records that this receiver accepted a PTP SETUP without a
+	// ClockID, so later sessions on this connection use NTP timing.
+	ptpUnavailable bool
+
 	// pairingProtocol records the wire protocol that actually completed on this
 	// connection. It starts unset because feature flags choose only which
 	// protocol to probe first; a receiver may advertise HAP while implementing

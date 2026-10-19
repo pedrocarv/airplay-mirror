@@ -89,6 +89,15 @@ receiver ClockID locally when Apple's private PTP headers are absent. That
 fallback assumes the receiver uses the sender's numeric boot-clock phase; it is
 not equivalent to participating in a PTP clock domain.
 .TP
+.B sony
+Advertise third-party/HKP HAP and feature-41 PTP from AirTunes/377.30, as a
+Sony Google TV does. It accepts the control SETUP of a PTP session but omits
+.B ClockID
+from its
+.BR timingPeerInfo ,
+which verifies that the sender tears that attempt down and sets up a fresh
+session with receiver-initiated NTP on the same control connection.
+.TP
 .B appletv3
 Advertise raw pairing with feature 27, FPSAP, ALAC, and no PTP or feature 59. It
 rejects the initial control SETUP and verifies the one media-first transition,
@@ -161,7 +170,7 @@ startup.
 .TP
 .B \-profile \fIPROFILE\fR
 Receiver-side validation preset: \fBmodern\fR, \fBroku\fR, \fBlg\fR,
-\fBappletv3\fR, \fBuxplay\fR, or \fBairserver\fR. The default is
+\fBsony\fR, \fBappletv3\fR, \fBuxplay\fR, or \fBairserver\fR. The default is
 .BR roku .
 .TP
 .B \-auth \fIMODE\fR
