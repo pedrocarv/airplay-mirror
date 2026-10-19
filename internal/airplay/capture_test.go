@@ -1007,6 +1007,86 @@ func TestWindowsCaptureSourceStage(t *testing.T) {
 	}
 }
 
+func TestD3D11WindowsPipelineConvertsAndScalesOnGPU(t *testing.T) {
+	encoder := encoderResult{parts: gstStage{"x264enc"}, rawFormat: "I420", codec: VideoCodecH264}
+	source := windowsCaptureSourceStage(CaptureConfig{ShowCursor: true, WindowsMonitorIndex: -1})
+	joined := strings.Join(buildD3D11WindowsVideoPipeline(source, 30, encoder, 1920, 1080, true), " ")
+	for _, forbidden := range []string{"videoconvert", "videoscale"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("Windows pipeline converts on the CPU with %q: %s", forbidden, joined)
+		}
+	}
+	wantOrder := []string{
+		"d3d11screencapturesrc",
+		"video/x-raw(memory:D3D11Memory),framerate=30/1",
+		"queue max-size-buffers=1",
+		"d3d11convert add-borders=true",
+		"video/x-raw(memory:D3D11Memory),format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1",
+		"d3d11download",
+		"video/x-raw,format=I420",
+		"x264enc",
+		"rtponviftimestamp",
+		"fdsink fd=1",
+	}
+	position := 0
+	for _, want := range wantOrder {
+		index := strings.Index(joined[position:], want)
+		if index < 0 {
+			t.Fatalf("Windows pipeline is missing %q after offset %d: %s", want, position, joined)
+		}
+		position += index + len(want)
+	}
+
+	native := strings.Join(buildD3D11WindowsVideoPipeline(source, 30, encoder, 0, 0, true), " ")
+	if strings.Contains(native, "width=") {
+		t.Errorf("native-size Windows pipeline still scales: %s", native)
+	}
+}
+
+// TestWindowsScreenCaptureFrameRate runs the real Windows capture pipeline.
+// It needs GStreamer and an interactive desktop, so it runs only when
+// DOUBLETAKE_WINDOWS_CAPTURE_TEST=1.
+func TestWindowsScreenCaptureFrameRate(t *testing.T) {
+	if os.Getenv("DOUBLETAKE_WINDOWS_CAPTURE_TEST") != "1" {
+		t.Skip("set DOUBLETAKE_WINDOWS_CAPTURE_TEST=1 to capture the Windows desktop")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cfg := CaptureConfig{FPS: 30, HWAccel: "none", ShowCursor: true, WindowsMonitorIndex: -1, VideoCodec: VideoCodecH264}
+	preparation, err := PrepareCapture(ctx, cfg)
+	if err != nil {
+		t.Fatalf("prepare capture: %v", err)
+	}
+	capture, err := preparation.StartWithCodec(1920, 1080, VideoCodecH264)
+	if err != nil {
+		t.Fatalf("start capture: %v", err)
+	}
+	defer capture.Stop()
+
+	const window = 5 * time.Second
+	started := time.Now()
+	frames := 0
+	var oldest time.Duration
+	for time.Since(started) < window {
+		unit, err := capture.ReadVideoAccessUnit()
+		if err != nil {
+			t.Fatalf("read access unit after %d frames: %v", frames, err)
+		}
+		frames++
+		if age := time.Since(unit.PTS); age > oldest {
+			oldest = age
+		}
+	}
+	rate := float64(frames) / time.Since(started).Seconds()
+	t.Logf("Windows capture delivered %.1f frames/s; oldest frame %v", rate, oldest.Round(time.Millisecond))
+	if rate < 20 {
+		t.Fatalf("Windows capture delivered %.1f frames/s, want at least 20", rate)
+	}
+	if oldest > 500*time.Millisecond {
+		t.Fatalf("Windows capture frames were up to %v old, want under 500ms", oldest)
+	}
+}
+
 func TestWindowsCapturePreparationSkipsPipeWireResources(t *testing.T) {
 	preparation := &CapturePreparation{kind: capturePreparationWindows}
 	got, err := prepareCapturePlatformResources(context.Background(), CaptureConfig{}, preparation)

@@ -1,0 +1,50 @@
+name: Windows capture
+
+# Runs the real Direct3D 11 capture pipeline with the official GStreamer
+# runtime. The installer is large, so this runs only when capture code changes.
+on:
+  push:
+    paths:
+      - "internal/airplay/capture*.go"
+      - ".github/workflows/windows-capture.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GSTREAMER_VERSION: "1.28.8"
+  GSTREAMER_SHA256: "e4c41ee6ee9c6c32a45d198463ec08d79bac3bd5fa58adc93d13fe4a08abc9d9"
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install the GStreamer runtime
+        shell: powershell
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "gstreamer.exe"
+          $url = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GSTREAMER_VERSION/msvc/gstreamer-1.0-msvc-x86_64-$env:GSTREAMER_VERSION.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          if ($hash -ne $env:GSTREAMER_SHA256) { throw "GStreamer installer checksum mismatch: $hash" }
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TYPE=runtime" -Wait
+          $bin = "C:\Program Files\gstreamer\1.0\msvc_x86_64\bin"
+          if (-not (Test-Path (Join-Path $bin "gst-launch-1.0.exe"))) { throw "GStreamer was not installed in $bin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & (Join-Path $bin "gst-inspect-1.0.exe") d3d11convert | Select-Object -First 5
+
+      - name: Measure Windows screen capture
+        shell: powershell
+        env:
+          DOUBLETAKE_WINDOWS_CAPTURE_TEST: "1"
+        run: go test ./internal/airplay -run 'TestWindowsScreenCaptureFrameRate$' -v -count=1

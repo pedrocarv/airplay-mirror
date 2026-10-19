@@ -1044,6 +1044,27 @@ func buildVAWaylandVideoPipeline(fd int, nodeID uint32, fps int, encoder encoder
 	return appendGstVideoEncoding(args, encoder, timestampedOutput)
 }
 
+// buildD3D11WindowsVideoPipeline keeps colour conversion and scaling on the
+// GPU. Copying the full-resolution BGRA desktop into system memory and
+// converting and scaling it on the CPU produced only about three frames per
+// second on a real Windows PC, which left every frame later than the
+// receiver's playout lead. d3d11convert letterboxes into the receiver canvas
+// in Direct3D memory, so only the encoder-sized frame is downloaded.
+func buildD3D11WindowsVideoPipeline(source gstStage, fps int, encoder encoderResult, maxWidth, maxHeight int, timestampedOutput bool) []string {
+	args := append([]string{"--quiet"}, source...)
+	args = appendGstStage(args, gstStage{fmt.Sprintf("video/x-raw(memory:D3D11Memory),framerate=%d/1", fps)})
+	args = appendGstStage(args, lowLatencyVideoQueueStage())
+	args = appendGstStage(args, gstStage{"d3d11convert", "add-borders=true"})
+	caps := "video/x-raw(memory:D3D11Memory),format=" + encoder.rawFormat
+	if maxWidth > 1 && maxHeight > 1 {
+		caps += fmt.Sprintf(",width=%d,height=%d,pixel-aspect-ratio=1/1", maxWidth&^1, maxHeight&^1)
+	}
+	args = appendGstStage(args, gstStage{caps})
+	args = appendGstStage(args, gstStage{"d3d11download"})
+	args = appendGstStage(args, gstStage{"video/x-raw,format=" + encoder.rawFormat})
+	return appendGstVideoEncoding(args, encoder, timestampedOutput)
+}
+
 func canBuildVAWaylandVideoPipeline(encoder encoderResult, hasElement func(string) bool) bool {
 	return encoder.inputMemory == encoderInputVAMemory && hasElement != nil && hasElement("vapostproc")
 }
@@ -1742,8 +1763,7 @@ func startPreparedWindowsCapture(startupCtx, lifetimeCtx context.Context, cfg Ca
 	}
 
 	source := windowsCaptureSourceStage(cfg)
-	beforeConvert := []gstStage{frameRateStage(fps), lowLatencyVideoQueueStage()}
-	gstArgs := buildGstVideoPipeline(source, beforeConvert, nil, encoder, cfg.MaxWidth, cfg.MaxHeight, timestampedOutput)
+	gstArgs := buildD3D11WindowsVideoPipeline(source, fps, encoder, cfg.MaxWidth, cfg.MaxHeight, timestampedOutput)
 
 	dbg("[CAPTURE] gst-launch-1.0 (windows) %s", strings.Join(gstArgs, " "))
 	cmd := exec.CommandContext(captureCtx, "gst-launch-1.0", gstArgs...)
