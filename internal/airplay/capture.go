@@ -289,7 +289,18 @@ func PrepareCapture(ctx context.Context, cfg CaptureConfig) (*CapturePreparation
 	if !preparation.timestampedOutput {
 		log.Printf("[CAPTURE] warning: GStreamer RTP/ONVIF timestamp elements are unavailable; video will use output-time timestamps")
 	}
-	if kind == capturePreparationX11 {
+	return prepareCapturePlatformResources(ctx, cfg, preparation)
+}
+
+// prepareCapturePlatformResources performs only the setup that belongs to the
+// selected desktop capture backend. Windows screen capture is self-contained
+// in d3d11screencapturesrc, so it must not fall through to the Wayland portal
+// and PipeWire checks below.
+func prepareCapturePlatformResources(ctx context.Context, cfg CaptureConfig, preparation *CapturePreparation) (*CapturePreparation, error) {
+	switch preparation.kind {
+	case capturePreparationWindows:
+		return preparation, nil
+	case capturePreparationX11:
 		if err := exec.Command("gst-inspect-1.0", "ximagesrc").Run(); err != nil {
 			return nil, fmt.Errorf("GStreamer 'ximagesrc' plugin not found; install gst-plugins-good")
 		}
@@ -297,6 +308,10 @@ func PrepareCapture(ctx context.Context, cfg CaptureConfig) (*CapturePreparation
 			return nil, err
 		}
 		return preparation, nil
+	case capturePreparationWayland:
+		// Continue with the portal and PipeWire setup below.
+	default:
+		return nil, fmt.Errorf("invalid capture preparation kind %d", preparation.kind)
 	}
 
 	if err := exec.Command("gst-inspect-1.0", "pipewiresrc").Run(); err != nil {

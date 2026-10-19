@@ -15,6 +15,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test native Windows capture selection
+        shell: powershell
+        run: go test ./internal/airplay -run 'TestWindowsCapture(PreparationSkipsPipeWireResources|SourceStage)$'
+
       - name: Test receiver selection parsing in Windows PowerShell
         shell: powershell
         run: .\scripts\test-windows-discovery.ps1

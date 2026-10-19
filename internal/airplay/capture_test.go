@@ -1007,6 +1007,17 @@ func TestWindowsCaptureSourceStage(t *testing.T) {
 	}
 }
 
+func TestWindowsCapturePreparationSkipsPipeWireResources(t *testing.T) {
+	preparation := &CapturePreparation{kind: capturePreparationWindows}
+	got, err := prepareCapturePlatformResources(context.Background(), CaptureConfig{}, preparation)
+	if err != nil {
+		t.Fatalf("Windows capture preparation unexpectedly required non-Windows resources: %v", err)
+	}
+	if got != preparation {
+		t.Fatal("Windows capture preparation did not preserve the prepared capture")
+	}
+}
+
 func TestVAPostprocPlainRawWaylandPipelineScalesBeforeRetention(t *testing.T) {
 	encoder := encoderResult{parts: gstStage{"nvh265enc"}, rawFormat: "P010_10LE", codec: VideoCodecHEVC}
 	pipeline := buildVAPostprocPlainRawWaylandVideoPipeline(3, 42, 30, encoder, 1920, 1080, true)
