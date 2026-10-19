@@ -69,7 +69,10 @@ jobs:
       - name: Test and build Linux and Windows packages
         env:
           DOUBLETAKE_REQUIRE_FDK_AAC: "1"
-        run: ./scripts/build-packages.sh "${GITHUB_SHA::7}"
+        run: |
+          version=${GITHUB_SHA::7}
+          if [[ $GITHUB_REF_TYPE == tag ]]; then version=$GITHUB_REF_NAME; fi
+          ./scripts/build-packages.sh "$version"
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
