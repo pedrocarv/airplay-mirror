@@ -20,6 +20,9 @@ if ($devices[0].name -ne "Living Room TV" -or $devices[1].name -ne "Office TV") 
 if ($devices[0].ip -eq $devices[1].ip) {
     throw "Receiver addresses were collapsed into one value."
 }
+if ($devices[0].port -ne 7000 -or $devices[1].port -ne 7000) {
+    throw "Receiver ports were not converted to integers."
+}
 
 $oneReceiver = '{"name":"Bedroom TV","ip":"192.0.2.12","port":7000}'
 $single = @(ConvertFrom-AirPlayDiscoveryJson -Json $oneReceiver)
@@ -30,6 +33,12 @@ if ($single.Count -ne 1 -or $single[0].name -ne "Bedroom TV") {
 $empty = @(ConvertFrom-AirPlayDiscoveryJson -Json '[]')
 if ($empty.Count -ne 0) {
     throw "Empty discovery should return no receivers."
+}
+
+$processOutput = [System.Threading.Tasks.Task[string]]::FromResult($twoReceivers).Result
+$fromProcessOutput = @(ConvertFrom-AirPlayDiscoveryJson -Json $processOutput)
+if ($fromProcessOutput.Count -ne 2) {
+    throw "A string returned by an asynchronous process read did not preserve both receivers."
 }
 
 Write-Host "Windows discovery parsing passed."

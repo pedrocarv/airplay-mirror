@@ -313,10 +313,12 @@ function Finish-Discovery {
         Set-Status "Ready"
         return
     }
+    $parseError = $null
     try {
         $devices = @(ConvertFrom-AirPlayDiscoveryJson -Json $json)
     } catch {
         $devices = @()
+        $parseError = $_.Exception.Message
     }
     foreach ($device in $devices) {
         if (-not $device.ip) { continue }
@@ -327,10 +329,19 @@ function Finish-Discovery {
     if ($script:SelectedDevices.Count -gt 0) {
         $deviceCombo.SelectedIndex = 0
         $deviceCombo.Enabled = $true
+        Append-Log "Found $($script:SelectedDevices.Count) AirPlay receiver(s).`r`n"
     } else {
         $deviceCombo.Items.Add("No AirPlay TVs found") | Out-Null
         $deviceCombo.SelectedIndex = 0
         $deviceCombo.Enabled = $false
+        if ($parseError) {
+            Append-Log "Could not parse discovery results: $parseError`r`n"
+        } elseif (-not [string]::IsNullOrWhiteSpace($json) -and $json.Trim() -ne "[]") {
+            Append-Log "Discovery returned data, but it contained no usable receiver addresses.`r`n"
+            Append-Log "Raw discovery output: $($json.Trim())`r`n"
+        } else {
+            Append-Log "Discovery completed without finding a receiver.`r`n"
+        }
     }
     Set-Status "Ready"
 }

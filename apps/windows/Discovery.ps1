@@ -5,14 +5,36 @@ function ConvertFrom-AirPlayDiscoveryJson {
         return
     }
 
-    $parsedDevices = $Json | ConvertFrom-Json
+    # Use the .NET Framework deserializer instead of ConvertFrom-Json. Different
+    # Windows PowerShell 5.1 builds disagree about whether a top-level JSON
+    # array is emitted as one nested object or as individual pipeline objects.
+    Add-Type -AssemblyName System.Web.Extensions
+    $serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $parsed = $serializer.DeserializeObject($Json)
 
-    # Windows PowerShell 5.1 can emit a top-level JSON array as one nested
-    # pipeline object. Iterating the parsed value explicitly flattens that
-    # array so each receiver becomes its own ComboBox item.
-    foreach ($device in $parsedDevices) {
-        if ($null -ne $device -and $device.ip) {
-            Write-Output $device
+    $items = New-Object System.Collections.ArrayList
+    if ($parsed -is [System.Collections.IDictionary]) {
+        [void]$items.Add($parsed)
+    } else {
+        foreach ($item in $parsed) {
+            if ($null -ne $item) {
+                [void]$items.Add($item)
+            }
+        }
+    }
+
+    foreach ($item in $items) {
+        if (-not ($item -is [System.Collections.IDictionary])) {
+            continue
+        }
+        $address = [string]$item["ip"]
+        if (-not [string]::IsNullOrWhiteSpace($address)) {
+            [PSCustomObject]@{
+                name = [string]$item["name"]
+                model = [string]$item["model"]
+                ip = $address
+                port = [int]$item["port"]
+            }
         }
     }
 }
