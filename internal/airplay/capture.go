@@ -1201,6 +1201,14 @@ const (
 	captureStartupBudget              = 10 * time.Second
 	maxStartupProbeUnits              = 256
 	maxStartupProbeBytes              = 64 << 20
+
+	// windowsCaptureStartupProbeTimeout covers a cold gst-launch-1.0 on
+	// Windows, where loading GStreamer's DLLs (often under antivirus scanning),
+	// initializing Direct3D 11 capture, and starting x264 has been observed to
+	// exceed the generic probe window. It stays inside captureStartupBudget.
+	windowsCaptureStartupProbeTimeout = 8 * time.Second
+	// slowCaptureStartup is reported to the user, since it delays every session.
+	slowCaptureStartup = 3 * time.Second
 )
 
 // captureStartupProbeTimeout waits through a complete two-second keyframe
@@ -1751,6 +1759,7 @@ func startPreparedWindowsCapture(startupCtx, lifetimeCtx context.Context, cfg Ca
 		return nil, fmt.Errorf("gst stderr pipe: %w", err)
 	}
 
+	launchedAt := time.Now()
 	waitResult, err := startGStreamerCommand(cmd)
 	if err != nil {
 		cancel()
@@ -1777,16 +1786,22 @@ func startPreparedWindowsCapture(startupCtx, lifetimeCtx context.Context, cfg Ca
 		close(capture.waitCh)
 	}()
 
-	probeCtx, cancelProbe := context.WithTimeout(startupCtx, captureStartupProbeTimeout(fps))
+	probeCtx, cancelProbe := context.WithTimeout(startupCtx, windowsCaptureStartupProbeTimeout)
 	err = probeVideoCaptureStartup(probeCtx, capture, encoder.codec, timestampedOutput)
 	cancelProbe()
+	startup := time.Since(launchedAt).Round(100 * time.Millisecond)
 	if err != nil {
 		capture.Stop()
-		result := fmt.Errorf("Windows screen capture failed startup validation: %w", err)
+		result := fmt.Errorf("Windows screen capture failed startup validation after %v: %w", startup, err)
 		if stderr := capture.stderrText(); stderr != "" {
 			result = fmt.Errorf("%w; GStreamer stderr: %s", result, stderr)
 		}
 		return nil, result
+	}
+	if startup >= slowCaptureStartup {
+		log.Printf("[CAPTURE] Windows screen capture took %v to produce its first frames", startup)
+	} else {
+		dbg("[CAPTURE] Windows screen capture produced its first frames after %v", startup)
 	}
 
 	return capture, nil
