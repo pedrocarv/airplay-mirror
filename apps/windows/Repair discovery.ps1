@@ -26,13 +26,15 @@ Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue |
     Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
 # mDNS replies arrive on UDP 5353, and receivers send timing and control
-# packets to the engine's ephemeral UDP session ports.
+# packets to the engine's ephemeral UDP session ports. Campus and office
+# networks are usually classified as Public and may route receivers from
+# other subnets, so the rule is scoped to the engine rather than to a profile
+# or address range.
 New-NetFirewallRule `
     -DisplayName $ruleName `
-    -Description "Allow AirPlay Mirror to receive discovery and session traffic from AirPlay receivers on the local network." `
+    -Description "Allow AirPlay Mirror to receive discovery and session traffic from AirPlay receivers." `
     -Direction Inbound `
     -Action Allow `
     -Program $engine `
     -Protocol UDP `
-    -RemoteAddress LocalSubnet `
-    -Profile Private,Domain | Out-Null
+    -Profile Any | Out-Null

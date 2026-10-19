@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 )
 
 func TestIsAirPlayMDNSInterface(t *testing.T) {
@@ -202,7 +202,7 @@ func TestParseFeaturesUsesLowThenHighWireOrder(t *testing.T) {
 }
 
 func TestParseServiceEntryPreservesCapabilityAdvertisement(t *testing.T) {
-	entry := zeroconf.NewServiceEntry("Living\\ Room\\ TV", "_airplay._tcp", "local.")
+	entry := &zeroconf.ServiceEntry{ServiceRecord: zeroconf.ServiceRecord{Instance: "Living\\ Room\\ TV", Service: "_airplay._tcp", Domain: "local."}}
 	entry.Port = 7000
 	entry.AddrIPv4 = []net.IP{net.ParseIP("192.168.1.124")}
 	entry.Text = []string{

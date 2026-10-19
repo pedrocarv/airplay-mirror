@@ -25,6 +25,12 @@ jobs:
         shell: powershell
         run: go test ./internal/airplay -run 'TestWindowsCapture(PreparationSkipsPipeWireResources|SourceStage)$'
 
+      - name: Test mDNS receiver discovery on Windows sockets
+        shell: powershell
+        env:
+          DOUBLETAKE_MDNS_NETWORK_TEST: "1"
+        run: go test ./internal/airplay -run 'TestDiscoverAirPlayDevicesOverMulticast$' -v
+
       - name: Test receiver selection parsing in Windows PowerShell
         shell: powershell
         run: .\scripts\test-windows-discovery.ps1

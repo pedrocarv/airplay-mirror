@@ -155,6 +155,18 @@ function Repair-DiscoveryAccess {
     return $false
 }
 
+function Write-DiscoveryDiagnostics {
+    param([string]$EngineLog)
+    if (-not [string]::IsNullOrWhiteSpace($EngineLog)) {
+        Append-Log "$($EngineLog.Trim())`r`n"
+    }
+    try {
+        foreach ($connection in @(Get-NetConnectionProfile -ErrorAction Stop)) {
+            Append-Log "Network '$($connection.InterfaceAlias)' is $($connection.NetworkCategory).`r`n"
+        }
+    } catch { }
+}
+
 function New-ReadState {
     param([System.IO.StreamReader]$Reader)
     $buffer = New-Object char[] 1024
@@ -375,10 +387,11 @@ function Finish-Discovery {
             Append-Log "Raw discovery output: $($json.Trim())`r`n"
         } else {
             Append-Log "Discovery completed without finding a receiver.`r`n"
+            Write-DiscoveryDiagnostics $errorText
             if (-not $script:DiscoveryRepairOffered) {
                 $script:DiscoveryRepairOffered = $true
                 $choice = [System.Windows.Forms.MessageBox]::Show(
-                    "Windows may be blocking AirPlay discovery after the app update. Repair private-network access and search again? Windows will ask for administrator approval.",
+                    "Windows Firewall may be blocking AirPlay discovery. Allow AirPlay Mirror through the firewall and search again? Windows will ask for administrator approval.",
                     "Repair AirPlay discovery",
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Information

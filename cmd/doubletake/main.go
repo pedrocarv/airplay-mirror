@@ -88,6 +88,9 @@ func main() {
 	discoverJSON := flag.Bool("discover-json", false, "Discover AirPlay receivers for 5 seconds and print JSON")
 	flag.Parse()
 	if *discoverJSON {
+		if names, err := airplay.MDNSInterfaceNames(); err == nil {
+			log.Printf("browsing for AirPlay receivers on: %s", strings.Join(names, ", "))
+		}
 		discoverCtx, cancelDiscover := context.WithTimeout(context.Background(), 5*time.Second)
 		devices, err := airplay.DiscoverAirPlayDevices(discoverCtx)
 		cancelDiscover()

@@ -28,10 +28,11 @@ Notes
 * Desktop sound uses Windows WASAPI loopback capture.
 * Pairing credentials are stored under your Windows user profile in:
   .config\doubletake\credentials.json
-* Windows may ask for network access the first time. Allow Private networks so
-  AirPlay discovery can see TVs on your home network.
-* If an update causes discovery to return no TVs, the app can repair its
-  private-network firewall permission and retry after administrator approval.
+* Windows may ask for network access the first time. Allow access so
+  AirPlay discovery can see TVs on your network. On campus or office networks
+  Windows usually treats the network as Public, so allow that as well.
+* If discovery returns no TVs, the app can repair its Windows Firewall
+  permission and retry after administrator approval.
 
 Source: https://github.com/pedrocarv/airplay-mirror
 License: GNU Lesser General Public License v3.0

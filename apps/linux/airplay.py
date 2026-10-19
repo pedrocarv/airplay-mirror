@@ -622,8 +622,13 @@ class AirPlayWindow(Adw.ApplicationWindow):
         box.set_margin_end(18)
         title = "Enter the PIN shown on the TV" if is_pin else "Enter the TV password or pairing PIN"
         box.append(label(title, "title-3"))
-        entry = Gtk.PasswordEntry(show_peek_icon=True, activates_default=True)
-        entry.set_placeholder_text("AirPlay code")
+        # Gtk.PasswordEntry exposes placeholder text only as a property; it has
+        # no set_placeholder_text() method.
+        entry = Gtk.PasswordEntry(
+            show_peek_icon=True,
+            activates_default=True,
+            placeholder_text="AirPlay code",
+        )
         box.append(entry)
 
         def responded(_dialog: Gtk.Dialog, response: int) -> None:

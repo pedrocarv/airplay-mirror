@@ -58,7 +58,7 @@ When the portal picker opens, select the physical display you want to mirror. Se
 
 Install GStreamer from the [official Windows download page](https://gstreamer.freedesktop.org/download/#windows), extract the Windows release ZIP, and double-click `Start AirPlay.cmd`. The app checks for the required GStreamer elements before starting a stream.
 
-The Windows build uses Direct3D 11 desktop capture and WASAPI loopback audio. Windows may ask for network access on first launch; allow access on private networks so receiver discovery can work.
+The Windows build uses Direct3D 11 desktop capture and WASAPI loopback audio. Windows may ask for network access on first launch; allow it so receiver discovery can work. Campus and office networks are usually classified as Public, so allow that profile too. If no receivers are found, the app offers to repair its firewall permission.
 
 ## Build packages locally
 

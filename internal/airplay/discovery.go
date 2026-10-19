@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 )
 
 // AirPlayDevice represents a discovered AirPlay receiver.
@@ -85,14 +85,6 @@ func DiscoverAirPlayDevices(ctx context.Context) ([]AirPlayDevice, error) {
 		return nil, nil
 	}
 
-	resolver, err := zeroconf.NewResolver(
-		zeroconf.SelectIfaces(ifaces),
-		zeroconf.SelectIPTraffic(traffic),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("zeroconf resolver: %w", err)
-	}
-
 	entries := make(chan *zeroconf.ServiceEntry, 16)
 	var devices []AirPlayDevice
 
@@ -107,13 +99,31 @@ func DiscoverAirPlayDevices(ctx context.Context) ([]AirPlayDevice, error) {
 		}
 	}()
 
-	if err := resolver.Browse(ctx, "_airplay._tcp", "local.", entries); err != nil {
+	// Browse blocks until ctx is done and then closes entries. It returns early
+	// only when the mDNS sockets cannot be opened, in which case entries is
+	// never closed and the collector must not be awaited.
+	if err := zeroconf.Browse(ctx, "_airplay._tcp", "local.", entries,
+		zeroconf.SelectIfaces(ifaces),
+		zeroconf.SelectIPTraffic(traffic),
+	); err != nil {
 		return nil, fmt.Errorf("browse: %w", err)
 	}
 
-	<-ctx.Done()
 	<-done
 	return devices, nil
+}
+
+// MDNSInterfaceNames returns the network interfaces discovery browses on.
+func MDNSInterfaceNames() ([]string, error) {
+	ifaces, _, err := airPlayMDNSInterfaces()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(ifaces))
+	for _, iface := range ifaces {
+		names = append(names, iface.Name)
+	}
+	return names, nil
 }
 
 func airPlayMDNSInterfaces() ([]net.Interface, zeroconf.IPType, error) {
